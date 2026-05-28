@@ -132,3 +132,50 @@ func TestCreateWatchReturnsWhenWatcherInboxClosed(t *testing.T) {
 		t.Fatalf("WatchCount() = %d, want 0 after CreateWatch on closed watcher", got)
 	}
 }
+
+// TestDistributeDoesNotShareEventPointersAcrossResponses verifies that each
+// queued WatchResponse owns its Event. Distribute sets PrevKv differently per
+// watch, and WatchResponse copies only the Events slice header; reusing one
+// *Event would let a later watch mutate an earlier queued response.
+func TestDistributeDoesNotShareEventPointersAcrossResponses(t *testing.T) {
+	t.Parallel()
+
+	manager := NewManager(slog.Default(), nil)
+	watcher := &Watcher{
+		id:      1,
+		inboxOk: true,
+		inboxCh: make(chan pb.WatchResponse, 2),
+		watches: map[int64]watchEntry{
+			10: {key: []byte("key"), prevKv: true},
+			20: {key: []byte("key"), prevKv: false},
+		},
+		progress: map[int64]bool{},
+	}
+	manager.Register(watcher)
+
+	manager.Distribute(
+		&proto.Record{Revision: 2, Key: []byte("key"), Value: []byte("new")},
+		&proto.Record{Revision: 1, Key: []byte("key"), Value: []byte("old")},
+	)
+
+	responses := map[int64]pb.WatchResponse{}
+	for i := 0; i < 2; i++ {
+		select {
+		case msg := <-watcher.inboxCh:
+			responses[msg.WatchId] = msg
+		default:
+			t.Fatalf("received %d responses, want 2", i)
+		}
+	}
+
+	for watchID, msg := range responses {
+		gotPrevKV := len(msg.Events) == 1 && msg.Events[0].PrevKv != nil
+		wantPrevKV := watchID == 10
+		if gotPrevKV != wantPrevKV {
+			t.Errorf("watch %d: gotPrevKV=%v, wantPrevKV=%v", watchID, gotPrevKV, wantPrevKV)
+		}
+	}
+	if responses[10].Events[0] == responses[20].Events[0] {
+		t.Fatal("queued watch responses share the same Event pointer")
+	}
+}
