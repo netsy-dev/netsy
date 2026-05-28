@@ -191,9 +191,84 @@ func TestParseTxnRequest(t *testing.T) {
 			},
 			expectError: false,
 		},
-		// Invalid: Missing compare
+		// Valid: Create using version comparison (Kubernetes compactor shape)
 		{
-			name: "missing_compare",
+			name: "valid_version_create_operation",
+			request: &pb.TxnRequest{
+				Compare: []*pb.Compare{{
+					Key:    []byte("version-key"),
+					Target: pb.Compare_VERSION,
+					Result: pb.Compare_EQUAL,
+					TargetUnion: &pb.Compare_Version{
+						Version: 0,
+					},
+				}},
+				Success: []*pb.RequestOp{{
+					Request: &pb.RequestOp_RequestPut{
+						RequestPut: &pb.PutRequest{
+							Key:   []byte("version-key"),
+							Value: []byte("version-value"),
+						},
+					},
+				}},
+				Failure: []*pb.RequestOp{{
+					Request: &pb.RequestOp_RequestRange{
+						RequestRange: &pb.RangeRequest{
+							Key: []byte("version-key"),
+						},
+					},
+				}},
+			},
+			expected: &proto.Record{
+				Key:     []byte("version-key"),
+				Value:   []byte("version-value"),
+				Lease:   0,
+				Created: true,
+				Deleted: false,
+			},
+			expectError: false,
+		},
+		// Valid: Update using version comparison (Kubernetes compactor shape)
+		{
+			name: "valid_version_update_operation",
+			request: &pb.TxnRequest{
+				Compare: []*pb.Compare{{
+					Key:    []byte("version-key"),
+					Target: pb.Compare_VERSION,
+					Result: pb.Compare_EQUAL,
+					TargetUnion: &pb.Compare_Version{
+						Version: 2,
+					},
+				}},
+				Success: []*pb.RequestOp{{
+					Request: &pb.RequestOp_RequestPut{
+						RequestPut: &pb.PutRequest{
+							Key:   []byte("version-key"),
+							Value: []byte("updated-version-value"),
+						},
+					},
+				}},
+				Failure: []*pb.RequestOp{{
+					Request: &pb.RequestOp_RequestRange{
+						RequestRange: &pb.RangeRequest{
+							Key: []byte("version-key"),
+						},
+					},
+				}},
+			},
+			expected: &proto.Record{
+				Key:          []byte("version-key"),
+				Value:        []byte("updated-version-value"),
+				Lease:        0,
+				Created:      false,
+				Deleted:      false,
+				PrevRevision: 2,
+			},
+			expectError: false,
+		},
+		// Valid unconditional put operation (etcd Txn.Then(Put).Commit shape)
+		{
+			name: "valid_unconditional_put_operation",
 			request: &pb.TxnRequest{
 				Compare: []*pb.Compare{},
 				Success: []*pb.RequestOp{{
@@ -205,8 +280,13 @@ func TestParseTxnRequest(t *testing.T) {
 					},
 				}},
 			},
-			expectError: true,
-			errorMsg:    "invalid request - missing required fields",
+			expected: &proto.Record{
+				Key:     []byte("test-key"),
+				Value:   []byte("test-value"),
+				Created: true,
+				Deleted: false,
+			},
+			expectError: false,
 		},
 		// Invalid: Multiple compare operations
 		{
@@ -339,10 +419,10 @@ func TestParseTxnRequest(t *testing.T) {
 			request: &pb.TxnRequest{
 				Compare: []*pb.Compare{{
 					Key:    []byte("test-key"),
-					Target: pb.Compare_VERSION,
+					Target: pb.Compare_CREATE,
 					Result: pb.Compare_EQUAL,
-					TargetUnion: &pb.Compare_ModRevision{
-						ModRevision: 0,
+					TargetUnion: &pb.Compare_CreateRevision{
+						CreateRevision: 0,
 					},
 				}},
 				Success: []*pb.RequestOp{{
@@ -1439,6 +1519,88 @@ func TestLeaderTxnObjectStorageWriteIgnoresClientCancellation(t *testing.T) {
 	}
 }
 
+func TestLeaderTxnUnconditionalPutCreatesAndUpdates(t *testing.T) {
+	state := nodestate.New(slog.Default())
+	if err := state.SetPrimary(nodestate.PrimaryStarting); err != nil {
+		t.Fatalf("SetPrimary(Starting) error = %v", err)
+	}
+	if err := state.SetPrimary(nodestate.PrimaryActive); err != nil {
+		t.Fatalf("SetPrimary(Active) error = %v", err)
+	}
+
+	cfg := &config.Config{
+		NodeConfig: config.NodeConfig{
+			NodeID:  "node-a",
+			DataDir: t.TempDir(),
+		},
+		ClusterConfig: config.ClusterConfig{
+			Replication: config.ReplicationConfig{
+				Quorum:      intPtr(0),
+				ChunkBuffer: config.ChunkBufferConfig{},
+			},
+		},
+	}
+	db := openPrimaryTestDB(t)
+	srv := &Server{
+		logger:               slog.Default(),
+		config:               cfg,
+		db:                   db,
+		storageClient:        storage.NewMemoryStore(),
+		state:                state,
+		replicas:             NewReplicas(),
+		followStreams:        make(map[string]*followSession),
+		leaderTxnGate:        make(chan struct{}, 1),
+		quorumReceiptTimeout: time.Second,
+	}
+	srv.chunkBuffer = newChunkBuffer(slog.Default(), state, srv.storageClient, cfg.NodeID, 0, 0, nil)
+	if err := srv.initializeRevisionCounter(); err != nil {
+		t.Fatalf("initializeRevisionCounter() error = %v", err)
+	}
+
+	inserted, _, err := srv.LeaderTxn(context.Background(), unconditionalPutTxnRequest("key-1", "value-1"))
+	if err != nil {
+		t.Fatalf("first LeaderTxn() error = %v", err)
+	}
+	if !inserted.Created || inserted.PrevRevision != 0 || inserted.Revision != 1 {
+		t.Fatalf("first inserted record = %+v, want created revision 1 with no previous revision", inserted)
+	}
+
+	updated, _, err := srv.LeaderTxn(context.Background(), unconditionalPutTxnRequest("key-1", "value-2"))
+	if err != nil {
+		t.Fatalf("second LeaderTxn() error = %v", err)
+	}
+	if updated.Created || updated.PrevRevision != 1 || updated.Revision != 2 {
+		t.Fatalf("second inserted record = %+v, want update revision 2 with previous revision 1", updated)
+	}
+
+	latest, err := db.FindRecordByRev(2)
+	if err != nil {
+		t.Fatalf("FindRecordByRev(2) error = %v", err)
+	}
+	if string(latest.Value) != "value-2" || latest.Version != 2 || latest.CreateRevision != 1 {
+		t.Fatalf("latest record = %+v, want updated value with preserved create revision and incremented version", latest)
+	}
+
+	deleted, _, err := srv.LeaderTxn(context.Background(), deleteTxnRequest("key-1", 2))
+	if err != nil {
+		t.Fatalf("delete LeaderTxn() error = %v", err)
+	}
+	if !deleted.Deleted || deleted.PrevRevision != 2 || deleted.Revision != 3 {
+		t.Fatalf("deleted record = %+v, want delete revision 3 with previous revision 2", deleted)
+	}
+
+	recreated, _, err := srv.LeaderTxn(context.Background(), unconditionalPutTxnRequest("key-1", "value-3"))
+	if err != nil {
+		t.Fatalf("third LeaderTxn() error = %v", err)
+	}
+	if !recreated.Created || recreated.PrevRevision != 0 || recreated.Revision != 4 {
+		t.Fatalf("recreated record = %+v, want created revision 4 with no previous revision", recreated)
+	}
+	if string(recreated.Value) != "value-3" || recreated.Version != 1 || recreated.CreateRevision != 4 {
+		t.Fatalf("recreated record = %+v, want fresh value with reset version and create revision", recreated)
+	}
+}
+
 func TestLeaderTxnContextCanceledBeforeAdmissionDoesNotWrite(t *testing.T) {
 	state := nodestate.New(slog.Default())
 	if err := state.SetPrimary(nodestate.PrimaryStarting); err != nil {
@@ -1582,4 +1744,38 @@ func createTxnRequest(key, value string, modRevision int64) *pb.TxnRequest {
 		}}
 	}
 	return req
+}
+
+func unconditionalPutTxnRequest(key, value string) *pb.TxnRequest {
+	return &pb.TxnRequest{
+		Success: []*pb.RequestOp{{
+			Request: &pb.RequestOp_RequestPut{
+				RequestPut: &pb.PutRequest{
+					Key:   []byte(key),
+					Value: []byte(value),
+				},
+			},
+		}},
+	}
+}
+
+func deleteTxnRequest(key string, modRevision int64) *pb.TxnRequest {
+	return &pb.TxnRequest{
+		Compare: []*pb.Compare{{
+			Key:         []byte(key),
+			Target:      pb.Compare_MOD,
+			Result:      pb.Compare_EQUAL,
+			TargetUnion: &pb.Compare_ModRevision{ModRevision: modRevision},
+		}},
+		Success: []*pb.RequestOp{{
+			Request: &pb.RequestOp_RequestDeleteRange{
+				RequestDeleteRange: &pb.DeleteRangeRequest{Key: []byte(key)},
+			},
+		}},
+		Failure: []*pb.RequestOp{{
+			Request: &pb.RequestOp_RequestRange{
+				RequestRange: &pb.RangeRequest{Key: []byte(key)},
+			},
+		}},
+	}
 }

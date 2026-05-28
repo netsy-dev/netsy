@@ -85,6 +85,25 @@ func (ps *Server) LeaderTxn(ctx context.Context, r *pb.TxnRequest) (record *prot
 	} else if err != nil {
 		return nil, nil, fmt.Errorf("%w: %v", ErrInvalidTxnRequest, err)
 	}
+	if isUnconditionalSinglePut(r) {
+		// Apply etcd Put semantics: create absent keys, otherwise update the
+		// latest live revision. The leader write gate serializes callers, so this
+		// lookup remains stable until InsertRecord runs below.
+		records, _, _, err := ps.db.FindRecordsBy("key = ?", []any{record.Key}, 0, 1, "ASC")
+		if err != nil {
+			return nil, nil, fmt.Errorf("resolve unconditional put: %w", err)
+		}
+		if len(records) == 0 || records[0].Deleted {
+			record.Created = true
+			record.PrevRevision = 0
+		} else {
+			record.Created = false
+			record.PrevRevision = records[0].Revision
+		}
+	}
+	if err := ps.resolveVersionCompareTxn(record, r); err != nil {
+		return nil, nil, err
+	}
 	// Use the instance ID from config as the leader ID
 	record.LeaderId = ps.config.NodeID
 	// Assign the next revision ID. On quorum rollback the same revision is
@@ -127,9 +146,7 @@ func (ps *Server) LeaderTxn(ctx context.Context, r *pb.TxnRequest) (record *prot
 	}
 	// Insert record within transaction
 	inserted, err = ps.db.InsertRecord(record, tx)
-	if err != nil &&
-		errors.Is(err, localdb.ErrCompareRevisionFailed) &&
-		len(r.Failure) == 1 {
+	if err != nil && isTxnCompareFalseError(err) && len(r.Failure) == 1 {
 		_ = tx.Rollback()
 		// Range on compare failure
 		ps.logger.Debug("record insert error - executing failure op (range)", "error", err)
@@ -182,6 +199,48 @@ func (ps *Server) LeaderTxn(ctx context.Context, r *pb.TxnRequest) (record *prot
 		return nil, nil, fmt.Errorf("error building response: %w", err)
 	}
 	return inserted, resp, nil
+}
+
+func isTxnCompareFalseError(err error) bool {
+	return errors.Is(err, localdb.ErrCompareRevisionFailed) ||
+		errors.Is(err, localdb.ErrCreateKeyExists) ||
+		errors.Is(err, localdb.ErrDeleteKeyNotFound)
+}
+
+// isUnconditionalSinglePut reports whether r is etcd clientv3 using
+// Txn.Then(OpPut(...)).Commit(), which is what etcd benchmark txn-put
+// emits when --txn-ops=1
+func isUnconditionalSinglePut(r *pb.TxnRequest) bool {
+	return len(r.Compare) == 0 &&
+		len(r.Success) == 1 &&
+		len(r.Failure) == 0 &&
+		r.Success[0].GetRequestPut() != nil
+}
+
+// resolveVersionCompareTxn maps etcd VERSION comparisons to the latest
+// mod_revision before InsertRecord performs its compare-and-write check.
+// Kubernetes' etcd compactor uses Version(key) == n to guard a Put.
+func (ps *Server) resolveVersionCompareTxn(record *proto.Record, r *pb.TxnRequest) error {
+	if len(r.Compare) != 1 || r.Compare[0].Target != pb.Compare_VERSION {
+		return nil
+	}
+	expectedVersion := r.Compare[0].GetVersion()
+	if expectedVersion == 0 {
+		return nil
+	}
+
+	records, _, _, err := ps.db.FindRecordsBy("key = ?", []any{record.Key}, 0, 1, "ASC")
+	if err != nil {
+		return fmt.Errorf("resolve version compare: %w", err)
+	}
+	if len(records) == 0 || records[0].Deleted || records[0].Version != expectedVersion {
+		// Force InsertRecord's normal compare-failed path. That preserves the
+		// existing failure-range response handling in LeaderTxn.
+		record.PrevRevision = 0
+		return nil
+	}
+	record.PrevRevision = records[0].Revision
+	return nil
 }
 
 // executeObjectStorageTxn commits a transaction via synchronous object storage
@@ -379,16 +438,36 @@ func (ps *Server) startObjectStorageRecovery(record *proto.Record, cause error) 
 
 // ParseTxnRequest validates a pb.TxnRequest and creates a proto.Record
 func ParseTxnRequest(r *pb.TxnRequest) (*proto.Record, error) {
+	// Special-case unconditional single-Put transactions, which is how clientv3 can
+	// represent a plain Put. Kubernetes does not use this, but etcd benchmark
+	// with txn-put option does.
+	if isUnconditionalSinglePut(r) {
+		put := r.Success[0].GetRequestPut()
+		if put.PrevKv {
+			return nil, fmt.Errorf("invalid request - prevKv not supported for success put operations")
+		}
+		return &proto.Record{
+			Key:     put.Key,
+			Value:   put.Value,
+			Lease:   put.Lease,
+			Created: true,
+			Deleted: false,
+		}, nil
+	}
+
 	// Validate request
 	if len(r.Compare) != 1 ||
 		len(r.Success) != 1 ||
 		(len(r.Failure) != 0 && len(r.Failure) != 1) ||
-		r.Compare[0].Target != pb.Compare_MOD ||
+		(r.Compare[0].Target != pb.Compare_MOD && r.Compare[0].Target != pb.Compare_VERSION) ||
 		r.Compare[0].Result != pb.Compare_EQUAL {
 		return nil, fmt.Errorf("invalid request - missing required fields")
 	}
 	compareKey := r.Compare[0].GetKey()
-	compareModRevision := r.Compare[0].GetModRevision()
+	compareRevision := r.Compare[0].GetModRevision()
+	if r.Compare[0].Target == pb.Compare_VERSION {
+		compareRevision = r.Compare[0].GetVersion()
+	}
 	successPut := r.Success[0].GetRequestPut()
 	if successPut != nil && successPut.PrevKv {
 		return nil, fmt.Errorf("invalid request - prevKv not supported for success put operations")
@@ -416,7 +495,7 @@ func ParseTxnRequest(r *pb.TxnRequest) (*proto.Record, error) {
 	}
 	// check if create, update, or delete
 	var record *proto.Record
-	if compareModRevision == 0 && successPut != nil && successDelete == nil {
+	if compareRevision == 0 && successPut != nil && successDelete == nil {
 		// create
 		record = &proto.Record{
 			Key:     successPut.Key,
@@ -425,7 +504,7 @@ func ParseTxnRequest(r *pb.TxnRequest) (*proto.Record, error) {
 			Created: true, // true=created
 			Deleted: false,
 		}
-	} else if compareModRevision > 0 && successPut != nil && successDelete == nil && failureRange != nil {
+	} else if compareRevision > 0 && successPut != nil && successDelete == nil && failureRange != nil {
 		// update
 		record = &proto.Record{
 			Key:          successPut.Key,
@@ -433,16 +512,16 @@ func ParseTxnRequest(r *pb.TxnRequest) (*proto.Record, error) {
 			Lease:        successPut.Lease,
 			Created:      false, // false=updated
 			Deleted:      false,
-			PrevRevision: compareModRevision,
+			PrevRevision: compareRevision,
 		}
-	} else if compareModRevision > 0 && successPut == nil && successDelete != nil && failureRange != nil {
+	} else if compareRevision > 0 && successPut == nil && successDelete != nil && failureRange != nil {
 		// delete
 		record = &proto.Record{
 			Key:          successDelete.Key,
 			Value:        nil,
 			Created:      false,
 			Deleted:      true, // true=deleted
-			PrevRevision: compareModRevision,
+			PrevRevision: compareRevision,
 		}
 	} else {
 		// unknown
