@@ -11,7 +11,7 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/nadrama-com/s3lect"
+	"github.com/podplane/s3lect"
 )
 
 // Common storage errors — use s3lect's errors for compatibility.

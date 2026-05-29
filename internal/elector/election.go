@@ -12,7 +12,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/nadrama-com/s3lect"
+	"github.com/podplane/s3lect"
 
 	"github.com/netsy-dev/netsy/internal/config"
 	"github.com/netsy-dev/netsy/internal/metrics"

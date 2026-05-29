@@ -43,9 +43,9 @@ var watchIDCounter int64
 type Watcher struct {
 	id int64
 	sync.RWMutex
-	client   pb.Watch_WatchServer // the gRPC stream
-	sendMu   sync.Mutex           // serializes all Send calls on the gRPC stream
-	inboxOk  bool
+	client  pb.Watch_WatchServer // the gRPC stream
+	sendMu  sync.Mutex           // serializes all Send calls on the gRPC stream
+	inboxOk bool
 	// inboxCh buffers responses for the stream sender. Committed watch events
 	// are no-gap: a full inbox closes the watcher instead of dropping an event.
 	inboxCh  chan pb.WatchResponse
