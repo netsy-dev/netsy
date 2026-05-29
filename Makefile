@@ -70,7 +70,7 @@ fmt: ## Format Go source files
 	@go fmt ./...
 
 lint: ## Run linters (Go + shellcheck)
-	@go tool golangci-lint run
+	@go tool golangci-lint run --timeout=5m
 	@echo "Running shellcheck..."
 	@shellcheck scripts/**/*.sh
 
