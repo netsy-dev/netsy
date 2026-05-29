@@ -16,8 +16,8 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: "1.26"
-      - name: Lint
-        run: go tool golangci-lint run --timeout 5m
+      - name: Check formatting & lint
+        run: make precommit
       - name: Test
         run: go test -v -race -coverprofile=coverage.out ./...
       - uses: codecov/codecov-action@v5
