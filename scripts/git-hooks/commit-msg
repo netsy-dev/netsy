@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+# Netsy <https://netsy.dev>
+# Copyright 2026 Nadrama Pty Ltd
+# SPDX-License-Identifier: Apache-2.0
+set -eo pipefail
+
+# Enforce a Developer Certificate of Origin (DCO) sign-off on every commit.
+# Skips merge, squash, and fixup commits.
+
+commit_msg_file="$1"
+
+# Strip comment lines before checking.
+msg=$(grep -v '^#' "$commit_msg_file" || true)
+
+# Allow merges, reverts of merges, fixup/squash commits to pass without sign-off.
+case "$msg" in
+	"Merge "*|"Revert \"Merge "*|"fixup! "*|"squash! "*|"amend! "*)
+		exit 0
+		;;
+esac
+
+if ! grep -qE '^Signed-off-by: .+ <.+@.+>$' "$commit_msg_file"; then
+	echo "ERROR: missing Signed-off-by line." >&2
+	echo "Commit with 'git commit -s' to add a Developer Certificate of Origin sign-off." >&2
+	exit 1
+fi
