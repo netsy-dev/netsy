@@ -1,4 +1,5 @@
 Netsy <https://netsy.dev>
+Copyright The Netsy Authors
 SPDX-License-Identifier: Apache-2.0
 
 Netsy has been deployed with {{ .Values.replicas }} replicas.

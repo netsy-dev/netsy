@@ -1,5 +1,5 @@
 // Netsy <https://netsy.dev>
-// Copyright 2026 Nadrama Pty Ltd
+// Copyright The Netsy Authors
 // SPDX-License-Identifier: Apache-2.0
 
 // Command dev-s3 runs a local fake S3 server for development.
