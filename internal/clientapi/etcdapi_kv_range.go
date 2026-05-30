@@ -25,7 +25,7 @@ func (cs *ClientAPIServer) Range(ctx context.Context, r *pb.RangeRequest) (*pb.R
 		r.Revision = committed
 	}
 
-	resp, err := commonapi.Range(cs.db, ctx, r)
+	resp, err := commonapi.Range(cs.db, ctx, r, committed)
 	if cs.metrics != nil {
 		result := "success"
 		if err != nil {

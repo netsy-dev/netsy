@@ -105,9 +105,9 @@ func (db *database) selectRecord(queryEnd string, latestPerKey bool, excludeDele
 	return records, nil
 }
 
-func (db *database) FindRecordsBy(whereQuery string, whereArgs []any, revision int64, limit int64, order string) ([]*proto.Record, int64, int64, error) {
+func (db *database) FindRecordsBy(whereQuery string, whereArgs []any, revision int64, limit int64, order string) ([]*proto.Record, int64, error) {
 	if order != "ASC" && order != "DESC" {
-		return nil, 0, 0, fmt.Errorf("invalid order: %s", order)
+		return nil, 0, fmt.Errorf("invalid order: %s", order)
 	}
 
 	// Build WHERE clause
@@ -127,8 +127,9 @@ func (db *database) FindRecordsBy(whereQuery string, whereArgs []any, revision i
 	}
 
 	// Single query with CTE to get both count and records,
-	// using UNION ALL to return first row for metadata, then actual records after.
-	// This means an empty record set still returns the max revision in metadata.
+	// using UNION ALL to return first row for the total count, then
+	// actual records after. The total count is required even when the
+	// caller-supplied limit truncates the result set.
 	query := fmt.Sprintf(`
 		WITH filtered AS (
 			SELECT
@@ -138,37 +139,34 @@ func (db *database) FindRecordsBy(whereQuery string, whereArgs []any, revision i
 			%s
 		)
 		SELECT
-			COALESCE((SELECT MAX(revision) FROM records), 0) as max_revision,
 			(SELECT COUNT(*) FROM filtered WHERE rn = 1 AND deleted = 0) as records_count,
 			0 as revision, '' as key, 0 as created, 0 as deleted, 0 as create_revision, 0 as prev_revision, 0 as version, 0 as lease, 0 as dek, '' as value, '' as created_at, NULL as compacted_at, '' as leader_id, NULL as replicated_at
 		UNION ALL
 		SELECT
-			0 as max_revision, 0 as records_count,
+			0 as records_count,
 			revision, key, created, deleted, create_revision, prev_revision, version, lease, dek, value, created_at, compacted_at, leader_id, replicated_at
 		FROM filtered
 		WHERE rn = 1 AND deleted = 0
 		%s %s`, whereClause, orderClause, limitClause)
 	rows, err := db.conn.Query(query, whereArgs...)
 	if err != nil {
-		return nil, 0, 0, err
+		return nil, 0, err
 	}
 	defer rows.Close()
 
 	// Parse query results - first row is always metadata, subsequent rows are records
 	var records []*proto.Record
-	var maxRevision int64
 	var totalCount int64
 	isFirstRow := true
 
 	for rows.Next() {
-		var maxRevisionValue, totalCountValue int64
+		var totalCountValue int64
 		var record proto.Record
 		var createdAtStr string
 		var compactedAtStr, replicatedAtStr sql.NullString
 
 		err := rows.Scan(
-			&maxRevisionValue, // max_revision (only in first row)
-			&totalCountValue,  // records_count (only in first row)
+			&totalCountValue, // records_count (only in first row)
 			&record.Revision,
 			&record.Key,
 			&record.Created,
@@ -185,12 +183,11 @@ func (db *database) FindRecordsBy(whereQuery string, whereArgs []any, revision i
 			&replicatedAtStr,
 		)
 		if err != nil {
-			return nil, 0, 0, err
+			return nil, 0, err
 		}
 
 		// First row contains metadata
 		if isFirstRow {
-			maxRevision = maxRevisionValue
 			totalCount = totalCountValue
 			isFirstRow = false
 			continue // Skip to next row for actual records
@@ -216,10 +213,10 @@ func (db *database) FindRecordsBy(whereQuery string, whereArgs []any, revision i
 		records = append(records, &record)
 	}
 	if err = rows.Err(); err != nil {
-		return nil, 0, 0, err
+		return nil, 0, err
 	}
 
-	return records, totalCount, maxRevision, nil
+	return records, totalCount, nil
 }
 
 // FindAllRecordsForSnapshot returns all records up to the specified revision,
