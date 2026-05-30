@@ -308,6 +308,12 @@ const preflightRetryDelay = time.Second
 // node lost the Starting state or its context was cancelled.
 var errPreflightStopped = errors.New("primary preflight stopped")
 
+// initialRecordKey is the key of the record the first Primary writes at
+// revision 1 on an empty cluster so the committed revision starts at 1, for
+// parity with etcd. Later Primaries and Replicas inherit it through the
+// normal chunk and snapshot pathways.
+const initialRecordKey = "_netsy"
+
 // RunDegradationLoop periodically checks all Replicas and marks any as
 // Degraded if they have missed the configured number of consecutive
 // heartbeats. It runs until ctx is cancelled.

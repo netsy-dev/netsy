@@ -159,6 +159,23 @@ func (s *Server) runPreflightPass(ctx context.Context) error {
 		s.metrics.ObjectStorageRevision.Set(float64(durableRevision))
 	}
 
+	// Insert an initial record at revision 1 if cluster is empty so the
+	// committed revision starts at 1 for parity with etcd. The records-replay
+	// loop below uploads it as a normal chunk.
+	if durableRevision == 0 && latestLocalRevision == 0 {
+		initial := &pb.Record{
+			Revision: 1,
+			Key:      []byte(initialRecordKey),
+			Created:  true,
+			Value:    []byte{},
+			LeaderId: s.config.NodeID,
+		}
+		if _, err := s.db.InsertRecord(initial, nil); err != nil {
+			return fmt.Errorf("insert initial record: %w", err)
+		}
+		s.logger.Info("initialized cluster", "key", initialRecordKey, "revision", initial.Revision)
+	}
+
 	records, err := s.db.FindRecordsAfterRevision(durableRevision)
 	if err != nil {
 		return fmt.Errorf("list local records above durable revision %d: %w", durableRevision, err)

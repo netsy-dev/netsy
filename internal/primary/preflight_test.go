@@ -184,6 +184,107 @@ func TestPrimaryCrashRecoveryViaPreflight(t *testing.T) {
 	assertFollowCommit(t, <-session.sendCh, 3)
 }
 
+// TestRunPreflightPassInsertsInitialRecordOnEmptyCluster verifies that the
+// first Primary on an empty cluster inserts the initial record at revision 1,
+// uploads it to object storage, and advances committed revision to 1.
+func TestRunPreflightPassInsertsInitialRecordOnEmptyCluster(t *testing.T) {
+	db := openPrimaryTestDB(t)
+	store := storage.NewMemoryStore()
+	state := nodestate.New(slog.Default())
+	cfg := &config.Config{
+		NodeConfig: config.NodeConfig{
+			NodeID:  "node-a",
+			DataDir: t.TempDir(),
+		},
+	}
+
+	srv := newPrimaryPreflightTestServer(t, cfg, db, store, state)
+	if err := state.SetPrimary(nodestate.PrimaryStarting); err != nil {
+		t.Fatalf("SetPrimary(Starting) error = %v", err)
+	}
+
+	if err := srv.runPreflightPass(context.Background()); err != nil {
+		t.Fatalf("runPreflightPass() error = %v", err)
+	}
+
+	latestRevision, err := db.LatestRevision()
+	if err != nil {
+		t.Fatalf("LatestRevision() error = %v", err)
+	}
+	if latestRevision != 1 {
+		t.Fatalf("LatestRevision() = %d, want 1", latestRevision)
+	}
+	if state.Committed() != 1 {
+		t.Fatalf("Committed() = %d, want 1", state.Committed())
+	}
+	if got := srv.nextRevisionID.Load(); got != 2 {
+		t.Fatalf("nextRevisionID = %d, want 2", got)
+	}
+
+	if _, _, err := store.Get(context.Background(), datastore.ChunkKey(1)); err != nil {
+		t.Fatalf("store.Get(chunk 1) error = %v", err)
+	}
+
+	if err := db.VerifyIntegrity(); err != nil {
+		t.Fatalf("VerifyIntegrity() error = %v", err)
+	}
+}
+
+// TestRunPreflightPassSkipsInitialRecordWhenChunksExist verifies that a
+// Primary joining a cluster that already has durable chunks does not re-insert
+// the initial record. It arrives through the normal chunk import path.
+func TestRunPreflightPassSkipsInitialRecordWhenChunksExist(t *testing.T) {
+	db := openPrimaryTestDB(t)
+	store := storage.NewMemoryStore()
+	state := nodestate.New(slog.Default())
+	cfg := &config.Config{
+		NodeConfig: config.NodeConfig{
+			NodeID:  "node-b",
+			DataDir: t.TempDir(),
+		},
+	}
+
+	// Simulate the initial record already being durable in object storage
+	// from an earlier Primary.
+	initial := &proto.Record{
+		Revision:       1,
+		Key:            []byte(initialRecordKey),
+		Created:        true,
+		Version:        1,
+		CreateRevision: 1,
+		CreatedAt:      timestamppb.New(time.Unix(1, 0).UTC()),
+		LeaderId:       "node-a",
+		Value:          []byte{},
+	}
+	initialKey, initialData := encodePrimaryTestChunk(t, "node-a", initial)
+	if err := store.Put(context.Background(), initialKey, initialData); err != nil {
+		t.Fatalf("store.Put(%s) error = %v", initialKey, err)
+	}
+
+	srv := newPrimaryPreflightTestServer(t, cfg, db, store, state)
+	if err := state.SetPrimary(nodestate.PrimaryStarting); err != nil {
+		t.Fatalf("SetPrimary(Starting) error = %v", err)
+	}
+
+	if err := srv.runPreflightPass(context.Background()); err != nil {
+		t.Fatalf("runPreflightPass() error = %v", err)
+	}
+
+	latestRevision, err := db.LatestRevision()
+	if err != nil {
+		t.Fatalf("LatestRevision() error = %v", err)
+	}
+	if latestRevision != 1 {
+		t.Fatalf("LatestRevision() = %d, want 1", latestRevision)
+	}
+	if state.Committed() != 1 {
+		t.Fatalf("Committed() = %d, want 1", state.Committed())
+	}
+	if err := db.VerifyIntegrity(); err != nil {
+		t.Fatalf("VerifyIntegrity() error = %v", err)
+	}
+}
+
 // openPrimaryTestDB creates and opens a SQLite database for Primary tests.
 func openPrimaryTestDB(t *testing.T) localdb.Database {
 	t.Helper()
