@@ -47,9 +47,7 @@ func TestDownloadAndImportFile(t *testing.T) {
 		slog.Default(),
 		db,
 		store,
-		t.TempDir(),
 		ChunkKey(record.GetRevision()),
-		int64(len(payload)),
 		pb.FileKind_KIND_CHUNK,
 		nil,
 	); err != nil {

@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/netsy-dev/netsy/internal/datastore"
 	"github.com/netsy-dev/netsy/internal/discovery"
 	"github.com/netsy-dev/netsy/internal/nodestate"
 	"github.com/netsy-dev/netsy/internal/storage"
@@ -18,7 +19,7 @@ import (
 // Bootstrap loads the node map from object storage when this node acquires
 // Elector leadership. It reads members.json and node registration files,
 // populating the in-memory node map. If members.json does not exist (first
-// Elector), it creates one from discovered node registration files.
+// Elector), it promotes any bootstrap snapshot before creating members.json.
 func (s *Server) Bootstrap(ctx context.Context) error {
 	s.logger.Info("starting elector bootstrap")
 
@@ -59,10 +60,27 @@ func (s *Server) Bootstrap(ctx context.Context) error {
 	return nil
 }
 
-// bootstrapFirstElector handles the case where no members.json exists yet.
-// It creates a new MembersFile, allocates member_ids for all discovered
+// bootstrapFirstElector handles the case where no members.json exists yet. It
+// first promotes any operator-provided bootstrap snapshot into normal snapshot
+// history, then creates a new MembersFile, allocates member_ids for discovered
 // node registration files, and writes the initial members.json.
 func (s *Server) bootstrapFirstElector(ctx context.Context, regs []discovery.NodeRegistration) error {
+	s.logger.Info("first elector bootstrap — checking for bootstrap snapshot",
+		"discovered_nodes", len(regs),
+	)
+
+	bootstrapSnapshotInfo, err := datastore.PromoteBootstrapSnapshot(ctx, s.store, s.bootstrapTempDir)
+	if err != nil {
+		return fmt.Errorf("promote bootstrap snapshot: %w", err)
+	}
+	if bootstrapSnapshotInfo.Found {
+		s.logger.Info("bootstrap snapshot promoted",
+			"source_key", datastore.BootstrapSnapshotKey,
+			"snapshot_key", bootstrapSnapshotInfo.Key,
+			"revision", bootstrapSnapshotInfo.Revision,
+		)
+	}
+
 	s.logger.Info("first elector bootstrap — creating members.json",
 		"discovered_nodes", len(regs),
 	)

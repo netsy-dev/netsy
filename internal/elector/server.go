@@ -46,6 +46,7 @@ type Server struct {
 	logger            *slog.Logger
 	clusterID         string
 	store             storage.ObjectStorage
+	bootstrapTempDir  string
 	state             *nodestate.State
 	nodeMap           *NodeMap
 	deregTimeout      time.Duration

@@ -94,6 +94,29 @@ func (m *MemoryStore) PutStream(_ context.Context, key string, r io.Reader, _ in
 	return nil
 }
 
+func (m *MemoryStore) PutStreamIfMatch(_ context.Context, key string, r io.Reader, _ int64, etag string) error {
+	data, err := io.ReadAll(r)
+	if err != nil {
+		return err
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	existing, exists := m.objects[key]
+	if etag == "" && exists {
+		return ErrPrecondition
+	}
+	if etag != "" && !exists {
+		return ErrPrecondition
+	}
+	if etag != "" && exists && etag != contentETag(existing) {
+		return ErrPrecondition
+	}
+	m.objects[key] = data
+	return nil
+}
+
 func (m *MemoryStore) Delete(_ context.Context, key string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()

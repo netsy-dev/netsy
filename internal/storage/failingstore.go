@@ -26,7 +26,7 @@ func NewFailingStore(inner ObjectStorage) *FailingStore {
 	return &FailingStore{inner: inner}
 }
 
-// SetFailPut toggles whether Put, PutIfMatch, and PutStream calls fail.
+// SetFailPut toggles whether Put, PutIfMatch, PutStream, and PutStreamIfMatch calls fail.
 func (f *FailingStore) SetFailPut(fail bool) {
 	f.mu.Lock()
 	f.failPut = fail
@@ -90,6 +90,14 @@ func (f *FailingStore) PutStream(ctx context.Context, key string, r io.Reader, s
 		return fmt.Errorf("failingstore: simulated put failure")
 	}
 	return f.inner.PutStream(ctx, key, r, size)
+}
+
+// PutStreamIfMatch delegates to the inner store, or returns an error if put failures are enabled.
+func (f *FailingStore) PutStreamIfMatch(ctx context.Context, key string, r io.Reader, size int64, etag string) error {
+	if f.shouldFailPut() {
+		return fmt.Errorf("failingstore: simulated put failure")
+	}
+	return f.inner.PutStreamIfMatch(ctx, key, r, size, etag)
 }
 
 // Delete delegates to the inner store.

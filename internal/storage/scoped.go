@@ -43,6 +43,10 @@ func (s *scopedStorage) PutStream(ctx context.Context, key string, r io.Reader, 
 	return s.underlying.PutStream(ctx, s.prefix+key, r, size)
 }
 
+func (s *scopedStorage) PutStreamIfMatch(ctx context.Context, key string, r io.Reader, size int64, etag string) error {
+	return s.underlying.PutStreamIfMatch(ctx, s.prefix+key, r, size, etag)
+}
+
 func (s *scopedStorage) Delete(ctx context.Context, key string) error {
 	return s.underlying.Delete(ctx, s.prefix+key)
 }

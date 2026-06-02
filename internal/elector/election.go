@@ -126,6 +126,7 @@ func New(
 		nil,
 		retryMetrics,
 	)
+	r.server.bootstrapTempDir = cfg.DataDir
 
 	return r, nil
 }

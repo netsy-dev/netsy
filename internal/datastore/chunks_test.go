@@ -39,6 +39,10 @@ func (m *mockStorage) PutStream(ctx context.Context, key string, data io.Reader,
 	return nil
 }
 
+func (m *mockStorage) PutStreamIfMatch(ctx context.Context, key string, data io.Reader, size int64, etag string) error {
+	return nil
+}
+
 func (m *mockStorage) Delete(ctx context.Context, key string) error {
 	return nil
 }

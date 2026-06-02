@@ -145,9 +145,7 @@ func (s *Server) runPreflightPass(ctx context.Context) error {
 			s.logger,
 			s.db,
 			s.storageClient,
-			s.config.DataDir,
 			chunk.Key,
-			chunk.Size,
 			pb.FileKind_KIND_CHUNK,
 			s.storageMetrics,
 		); err != nil {

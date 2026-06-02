@@ -113,6 +113,9 @@ func (e *errorStorage) GetStream(_ context.Context, _ string) (io.ReadCloser, er
 func (e *errorStorage) PutStream(_ context.Context, _ string, _ io.Reader, _ int64) error {
 	return fmt.Errorf("put error")
 }
+func (e *errorStorage) PutStreamIfMatch(_ context.Context, _ string, _ io.Reader, _ int64, _ string) error {
+	return fmt.Errorf("put error")
+}
 func (e *errorStorage) Delete(_ context.Context, _ string) error {
 	return fmt.Errorf("delete error")
 }
