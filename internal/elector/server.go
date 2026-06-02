@@ -1,5 +1,5 @@
 // Netsy <https://netsy.dev>
-// Copyright 2026 Nadrama Pty Ltd
+// Copyright The Netsy Authors
 // SPDX-License-Identifier: Apache-2.0
 
 package elector
@@ -46,6 +46,7 @@ type Server struct {
 	logger            *slog.Logger
 	clusterID         string
 	store             storage.ObjectStorage
+	bootstrapTempDir  string
 	state             *nodestate.State
 	nodeMap           *NodeMap
 	deregTimeout      time.Duration

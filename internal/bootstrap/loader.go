@@ -1,5 +1,5 @@
 // Netsy <https://netsy.dev>
-// Copyright 2026 Nadrama Pty Ltd
+// Copyright The Netsy Authors
 // SPDX-License-Identifier: Apache-2.0
 
 package bootstrap
@@ -190,7 +190,7 @@ func Run(
 			logger.Info("local_db_rebuild_completed", "reason", "integrity_check_failed", "attempt", attempt)
 		}
 
-		backfillFrom, err := prepareLocalState(ctx, logger, cfg, state, db, store, latestSnapshotInfo, storageMetrics)
+		backfillFrom, err := prepareLocalState(ctx, logger, state, db, store, latestSnapshotInfo, storageMetrics)
 		if err != nil {
 			return nil, err
 		}
@@ -207,7 +207,7 @@ func Run(
 			follower.Stop()
 		}
 
-		if err := backfillChunksFromRevision(ctx, logger, db, cfg, backfillFrom, store, storageMetrics); err != nil {
+		if err := backfillChunksFromRevision(ctx, logger, db, backfillFrom, store, storageMetrics); err != nil {
 			return nil, fmt.Errorf("backfill chunks: %w", err)
 		}
 
@@ -247,7 +247,6 @@ func Run(
 func prepareLocalState(
 	ctx context.Context,
 	logger *slog.Logger,
-	cfg *config.Config,
 	state *nodestate.State,
 	db localdb.Database,
 	store storage.ObjectStorage,
@@ -271,7 +270,7 @@ func prepareLocalState(
 		return latestRevision, nil
 	}
 
-	if err := importLatestSnapshot(ctx, logger, db, cfg, latestSnapshotInfo, store, storageMetrics); err != nil {
+	if err := importLatestSnapshot(ctx, logger, db, latestSnapshotInfo, store, storageMetrics); err != nil {
 		return 0, fmt.Errorf("import latest snapshot: %w", err)
 	}
 

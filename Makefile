@@ -1,5 +1,5 @@
 # Netsy <https://netsy.dev>
-# Copyright 2026 Nadrama Pty Ltd
+# Copyright The Netsy Authors
 # SPDX-License-Identifier: Apache-2.0
 
 .DEFAULT_GOAL := help
@@ -60,6 +60,8 @@ setup: ## Verify required tools and enable git hooks
 	@echo "All required tools are installed."
 	@cp scripts/git-hooks/pre-commit .git/hooks/pre-commit
 	@chmod +x .git/hooks/pre-commit
+	@cp scripts/git-hooks/commit-msg .git/hooks/commit-msg
+	@chmod +x .git/hooks/commit-msg
 	@echo "Git hooks installed."
 
 ##@ Build & Test
@@ -68,7 +70,7 @@ fmt: ## Format Go source files
 	@go fmt ./...
 
 lint: ## Run linters (Go + shellcheck)
-	@go tool golangci-lint run
+	@go tool golangci-lint run --timeout=5m
 	@echo "Running shellcheck..."
 	@shellcheck scripts/**/*.sh
 

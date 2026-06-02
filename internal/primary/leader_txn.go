@@ -1,5 +1,5 @@
 // Netsy <https://netsy.dev>
-// Copyright 2026 Nadrama Pty Ltd
+// Copyright The Netsy Authors
 // SPDX-License-Identifier: Apache-2.0
 
 package primary
@@ -136,7 +136,7 @@ func (ps *Server) LeaderTxn(ctx context.Context, r *pb.TxnRequest) (record *prot
 		err = nil
 		rangeResp, err = commonapi.Range(ps.db, ctx, &pb.RangeRequest{
 			Key: []byte(record.Key),
-		})
+		}, ps.state.Committed())
 		if rangeResp == nil {
 			return nil, nil, fmt.Errorf("error getting range response: %w", err)
 		}

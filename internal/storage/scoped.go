@@ -1,5 +1,5 @@
 // Netsy <https://netsy.dev>
-// Copyright 2026 Nadrama Pty Ltd
+// Copyright The Netsy Authors
 // SPDX-License-Identifier: Apache-2.0
 
 package storage
@@ -41,6 +41,10 @@ func (s *scopedStorage) GetStream(ctx context.Context, key string) (io.ReadClose
 
 func (s *scopedStorage) PutStream(ctx context.Context, key string, r io.Reader, size int64) error {
 	return s.underlying.PutStream(ctx, s.prefix+key, r, size)
+}
+
+func (s *scopedStorage) PutStreamIfMatch(ctx context.Context, key string, r io.Reader, size int64, etag string) error {
+	return s.underlying.PutStreamIfMatch(ctx, s.prefix+key, r, size, etag)
 }
 
 func (s *scopedStorage) Delete(ctx context.Context, key string) error {

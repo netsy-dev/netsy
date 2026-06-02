@@ -1,5 +1,5 @@
 // Netsy <https://netsy.dev>
-// Copyright 2026 Nadrama Pty Ltd
+// Copyright The Netsy Authors
 // SPDX-License-Identifier: Apache-2.0
 
 package bootstrap
@@ -51,7 +51,6 @@ func TestBackfillChunksOnly(t *testing.T) {
 		context.Background(),
 		slog.Default(),
 		db,
-		cfg,
 		0,
 		store,
 		nil,
@@ -119,7 +118,6 @@ func TestBackfillFromSnapshotAndChunks(t *testing.T) {
 		context.Background(),
 		slog.Default(),
 		db,
-		cfg,
 		snapshotInfo,
 		store,
 		nil,
@@ -140,7 +138,6 @@ func TestBackfillFromSnapshotAndChunks(t *testing.T) {
 		context.Background(),
 		slog.Default(),
 		db,
-		cfg,
 		5,
 		store,
 		nil,

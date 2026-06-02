@@ -1,5 +1,5 @@
 // Netsy <https://netsy.dev>
-// Copyright 2026 Nadrama Pty Ltd
+// Copyright The Netsy Authors
 // SPDX-License-Identifier: Apache-2.0
 
 package storage
@@ -111,6 +111,9 @@ func (e *errorStorage) GetStream(_ context.Context, _ string) (io.ReadCloser, er
 	return nil, fmt.Errorf("get error")
 }
 func (e *errorStorage) PutStream(_ context.Context, _ string, _ io.Reader, _ int64) error {
+	return fmt.Errorf("put error")
+}
+func (e *errorStorage) PutStreamIfMatch(_ context.Context, _ string, _ io.Reader, _ int64, _ string) error {
 	return fmt.Errorf("put error")
 }
 func (e *errorStorage) Delete(_ context.Context, _ string) error {

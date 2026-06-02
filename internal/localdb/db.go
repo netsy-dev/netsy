@@ -1,5 +1,5 @@
 // Netsy <https://netsy.dev>
-// Copyright 2026 Nadrama Pty Ltd
+// Copyright The Netsy Authors
 // SPDX-License-Identifier: Apache-2.0
 
 package localdb
@@ -30,7 +30,7 @@ type Database interface {
 	DeriveCompactionRevision() (int64, error)
 	PersistCompactionRevision(revision int64) error
 	ExecuteCompaction(compactionRevision int64) (int64, error)
-	FindRecordsBy(whereQuery string, whereArgs []any, revision int64, limit int64, order string) ([]*proto.Record, int64, int64, error)
+	FindRecordsBy(whereQuery string, whereArgs []any, revision int64, limit int64, order string) ([]*proto.Record, int64, error)
 	FindRecordByRev(revision int64) (*proto.Record, error)
 	FindAllRecordsForSnapshot(upToRevision int64) ([]*proto.Record, error)
 	FindRecordsAfterRevision(revision int64) ([]*proto.Record, error)

@@ -47,6 +47,6 @@ See [docs/development.md](docs/development.md) for development environment setup
 ## License
 
 Netsy is licensed under the Apache License, Version 2.0.
-Copyright 2026 Nadrama Pty Ltd.
+Copyright The Netsy Authors.
 
 See the [LICENSE](./LICENSE) file for details.

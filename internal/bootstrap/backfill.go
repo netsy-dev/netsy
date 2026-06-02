@@ -1,5 +1,5 @@
 // Netsy <https://netsy.dev>
-// Copyright 2026 Nadrama Pty Ltd
+// Copyright The Netsy Authors
 // SPDX-License-Identifier: Apache-2.0
 
 package bootstrap
@@ -10,7 +10,6 @@ import (
 
 	"log/slog"
 
-	"github.com/netsy-dev/netsy/internal/config"
 	"github.com/netsy-dev/netsy/internal/datastore"
 	"github.com/netsy-dev/netsy/internal/localdb"
 	"github.com/netsy-dev/netsy/internal/metrics"
@@ -24,7 +23,6 @@ func importLatestSnapshot(
 	ctx context.Context,
 	logger *slog.Logger,
 	db localdb.Database,
-	cfg *config.Config,
 	snapshotInfo *datastore.LatestSnapshotInfo,
 	storageClient storage.ObjectStorage,
 	storageMetrics *metrics.ObjectStorageMetrics,
@@ -43,9 +41,7 @@ func importLatestSnapshot(
 		logger,
 		db,
 		storageClient,
-		cfg.DataDir,
 		snapshotInfo.Key,
-		snapshotInfo.Size,
 		pb.FileKind_KIND_SNAPSHOT,
 		storageMetrics,
 	)
@@ -58,7 +54,6 @@ func backfillChunksFromRevision(
 	ctx context.Context,
 	logger *slog.Logger,
 	db localdb.Database,
-	cfg *config.Config,
 	fromRevision int64,
 	storageClient storage.ObjectStorage,
 	storageMetrics *metrics.ObjectStorageMetrics,
@@ -84,9 +79,7 @@ func backfillChunksFromRevision(
 			logger,
 			db,
 			storageClient,
-			cfg.DataDir,
 			chunk.Key,
-			chunk.Size,
 			pb.FileKind_KIND_CHUNK,
 			storageMetrics,
 		); err != nil {

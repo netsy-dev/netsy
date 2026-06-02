@@ -1,5 +1,5 @@
 // Netsy <https://netsy.dev>
-// Copyright 2026 Nadrama Pty Ltd
+// Copyright The Netsy Authors
 // SPDX-License-Identifier: Apache-2.0
 
 package clientapi
@@ -89,12 +89,12 @@ func (cs *ClientAPIServer) ApplyTxn(ctx context.Context, r *pb.TxnRequest) (resp
 			cs.logger.Error("txn error", "txnerror", err.Error())
 			return nil, status.Error(codes.Internal, err.Error())
 		}
-		// Best-effort latest revision retrieval
-		// If this fails we still want to return a well formed error
-		latestRevision, _ := cs.db.LatestRevision()
+		// Return the cluster's current committed revision in the error
+		// response Header — matching etcd, which always reports the
+		// store's current revision.
 		resp = &pb.TxnResponse{
 			Header: &pb.ResponseHeader{
-				Revision: latestRevision,
+				Revision: cs.state.Committed(),
 			},
 		}
 	} else if inserted != nil && inserted.Created {

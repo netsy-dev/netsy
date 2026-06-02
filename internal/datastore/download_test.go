@@ -1,5 +1,5 @@
 // Netsy <https://netsy.dev>
-// Copyright 2026 Nadrama Pty Ltd
+// Copyright The Netsy Authors
 // SPDX-License-Identifier: Apache-2.0
 
 package datastore
@@ -47,9 +47,7 @@ func TestDownloadAndImportFile(t *testing.T) {
 		slog.Default(),
 		db,
 		store,
-		t.TempDir(),
 		ChunkKey(record.GetRevision()),
-		int64(len(payload)),
 		pb.FileKind_KIND_CHUNK,
 		nil,
 	); err != nil {

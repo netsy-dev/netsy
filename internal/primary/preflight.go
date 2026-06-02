@@ -1,5 +1,5 @@
 // Netsy <https://netsy.dev>
-// Copyright 2026 Nadrama Pty Ltd
+// Copyright The Netsy Authors
 // SPDX-License-Identifier: Apache-2.0
 
 package primary
@@ -145,9 +145,7 @@ func (s *Server) runPreflightPass(ctx context.Context) error {
 			s.logger,
 			s.db,
 			s.storageClient,
-			s.config.DataDir,
 			chunk.Key,
-			chunk.Size,
 			pb.FileKind_KIND_CHUNK,
 			s.storageMetrics,
 		); err != nil {
@@ -157,6 +155,23 @@ func (s *Server) runPreflightPass(ctx context.Context) error {
 
 	if s.metrics != nil {
 		s.metrics.ObjectStorageRevision.Set(float64(durableRevision))
+	}
+
+	// Insert an initial record at revision 1 if cluster is empty so the
+	// committed revision starts at 1 for parity with etcd. The records-replay
+	// loop below uploads it as a normal chunk.
+	if durableRevision == 0 && latestLocalRevision == 0 {
+		initial := &pb.Record{
+			Revision: 1,
+			Key:      []byte(initialRecordKey),
+			Created:  true,
+			Value:    []byte{},
+			LeaderId: s.config.NodeID,
+		}
+		if _, err := s.db.InsertRecord(initial, nil); err != nil {
+			return fmt.Errorf("insert initial record: %w", err)
+		}
+		s.logger.Info("initialized cluster", "key", initialRecordKey, "revision", initial.Revision)
 	}
 
 	records, err := s.db.FindRecordsAfterRevision(durableRevision)

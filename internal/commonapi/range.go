@@ -1,5 +1,5 @@
 // Netsy <https://netsy.dev>
-// Copyright 2026 Nadrama Pty Ltd
+// Copyright The Netsy Authors
 // SPDX-License-Identifier: Apache-2.0
 
 package commonapi
@@ -17,7 +17,13 @@ import (
 )
 
 // Range executes the shared Range request logic against the local database.
-func Range(db localdb.Database, ctx context.Context, r *pb.RangeRequest) (*pb.RangeResponse, error) {
+//
+// The committedRevision argument is the cluster's current committed revision
+// at the moment the caller dispatched the request; it is placed verbatim in
+// the response Header.Revision. This mirrors etcd, where Header.Revision is
+// always the store's current revision — not the maximum revision among the
+// matched records.
+func Range(db localdb.Database, ctx context.Context, r *pb.RangeRequest, committedRevision int64) (*pb.RangeResponse, error) {
 	// check if an unsupported option was specified
 	if r.KeysOnly {
 		return nil, status.Errorf(codes.Unimplemented, "keys_only not supported")
@@ -90,9 +96,8 @@ func Range(db localdb.Database, ctx context.Context, r *pb.RangeRequest) (*pb.Ra
 	}
 
 	// query data with count
-	var revision int64
 	var kvs []*mvccpb.KeyValue
-	rows, totalCount, maxRevision, err := db.FindRecordsBy(queryWhere, queryArgs, r.Revision, r.Limit, order)
+	rows, totalCount, err := db.FindRecordsBy(queryWhere, queryArgs, r.Revision, r.Limit, order)
 	if err != nil {
 		return nil, err
 	}
@@ -103,7 +108,7 @@ func Range(db localdb.Database, ctx context.Context, r *pb.RangeRequest) (*pb.Ra
 	if r.CountOnly {
 		return &pb.RangeResponse{
 			Header: &pb.ResponseHeader{
-				Revision: maxRevision,
+				Revision: committedRevision,
 			},
 			Count: totalCount,
 			More:  more,
@@ -115,9 +120,6 @@ func Range(db localdb.Database, ctx context.Context, r *pb.RangeRequest) (*pb.Ra
 	for _, row := range rows {
 		if row.CompactedAt != nil {
 			return nil, rpctypes.ErrGRPCCompacted
-		}
-		if revision == 0 || revision < row.Revision {
-			revision = row.Revision
 		}
 		kvs = append(kvs,
 			&mvccpb.KeyValue{
@@ -132,7 +134,7 @@ func Range(db localdb.Database, ctx context.Context, r *pb.RangeRequest) (*pb.Ra
 	}
 	return &pb.RangeResponse{
 		Header: &pb.ResponseHeader{
-			Revision: maxRevision,
+			Revision: committedRevision,
 		},
 		Kvs:   kvs,
 		Count: totalCount,

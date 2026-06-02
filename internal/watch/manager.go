@@ -1,5 +1,5 @@
 // Netsy <https://netsy.dev>
-// Copyright 2026 Nadrama Pty Ltd
+// Copyright The Netsy Authors
 // SPDX-License-Identifier: Apache-2.0
 
 package watch
@@ -126,14 +126,17 @@ func (m *Manager) Distribute(record *proto.Record, prevRecord *proto.Record) {
 		w.RLock()
 		for watchID, watch := range w.watches {
 			if isWatchMatch(watch, record) {
-				msg.WatchId = watchID
+				ev := *msg.Events[0]
 				if watch.prevKv {
-					msg.Events[0].PrevKv = msgPrevKv
+					ev.PrevKv = msgPrevKv
 				} else {
-					msg.Events[0].PrevKv = nil
+					ev.PrevKv = nil
 				}
+				outMsg := msg
+				outMsg.Events = []*mvccpb.Event{&ev}
+				outMsg.WatchId = watchID
 				select {
-				case w.inboxCh <- msg:
+				case w.inboxCh <- outMsg:
 				default:
 					// Preserve the watch stream's no-gap contract by failing the
 					// slow stream instead of dropping one committed event.

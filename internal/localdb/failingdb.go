@@ -1,5 +1,5 @@
 // Netsy <https://netsy.dev>
-// Copyright 2026 Nadrama Pty Ltd
+// Copyright The Netsy Authors
 // SPDX-License-Identifier: Apache-2.0
 
 package localdb
@@ -67,7 +67,7 @@ func (f *FailingDB) GetRevision(findRevision int64) (int64, bool, sql.NullString
 	return f.inner.GetRevision(findRevision)
 }
 
-func (f *FailingDB) FindRecordsBy(whereQuery string, whereArgs []any, revision int64, limit int64, order string) ([]*proto.Record, int64, int64, error) {
+func (f *FailingDB) FindRecordsBy(whereQuery string, whereArgs []any, revision int64, limit int64, order string) ([]*proto.Record, int64, error) {
 	return f.inner.FindRecordsBy(whereQuery, whereArgs, revision, limit, order)
 }
 

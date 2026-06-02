@@ -1,5 +1,5 @@
 // Netsy <https://netsy.dev>
-// Copyright 2026 Nadrama Pty Ltd
+// Copyright The Netsy Authors
 // SPDX-License-Identifier: Apache-2.0
 
 package storage
@@ -163,6 +163,47 @@ func (p *gcsProvider) PutStream(ctx context.Context, key string, r io.Reader, si
 	}
 
 	p.logger.Debug("object uploaded to GCS", "key", key, "bucket", p.config.Storage.BucketName)
+	return nil
+}
+
+// PutStreamIfMatch stores an object from a stream only if the ETag matches.
+// Returns ErrPrecondition when the precondition is not met.
+func (p *gcsProvider) PutStreamIfMatch(ctx context.Context, key string, r io.Reader, size int64, etag string) error {
+	obj := p.client.Bucket(p.config.Storage.BucketName).Object(key)
+
+	if etag == "" {
+		obj = obj.If(gcsstorage.Conditions{DoesNotExist: true})
+	} else {
+		var generation int64
+		if _, err := fmt.Sscanf(etag, "%d", &generation); err != nil {
+			return fmt.Errorf("failed to parse etag as generation: %w", err)
+		}
+		obj = obj.If(gcsstorage.Conditions{GenerationMatch: generation})
+	}
+
+	w := obj.NewWriter(ctx)
+	w.StorageClass = p.config.Storage.Class
+
+	if p.config.Storage.Encryption == "customer-managed" && p.config.Storage.KMSKeyID != "" {
+		w.KMSKeyName = p.config.Storage.KMSKeyID
+	}
+
+	if _, err := io.Copy(w, r); err != nil {
+		w.Close()
+		if isGCSPreconditionError(err) {
+			return ErrPrecondition
+		}
+		return fmt.Errorf("failed to write data to GCS: %w", err)
+	}
+
+	if err := w.Close(); err != nil {
+		if isGCSPreconditionError(err) {
+			return ErrPrecondition
+		}
+		return fmt.Errorf("failed to close GCS writer: %w", err)
+	}
+
+	p.logger.Debug("conditional object uploaded to GCS", "key", key, "bucket", p.config.Storage.BucketName)
 	return nil
 }
 

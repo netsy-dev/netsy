@@ -1,5 +1,5 @@
 // Netsy <https://netsy.dev>
-// Copyright 2026 Nadrama Pty Ltd
+// Copyright The Netsy Authors
 // SPDX-License-Identifier: Apache-2.0
 
 package datastore
@@ -36,6 +36,10 @@ func (m *mockStorage) GetStream(ctx context.Context, key string) (io.ReadCloser,
 }
 
 func (m *mockStorage) PutStream(ctx context.Context, key string, data io.Reader, size int64) error {
+	return nil
+}
+
+func (m *mockStorage) PutStreamIfMatch(ctx context.Context, key string, data io.Reader, size int64, etag string) error {
 	return nil
 }
 

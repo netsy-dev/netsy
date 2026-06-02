@@ -1,5 +1,5 @@
 // Netsy <https://netsy.dev>
-// Copyright 2026 Nadrama Pty Ltd
+// Copyright The Netsy Authors
 // SPDX-License-Identifier: Apache-2.0
 
 package datastore
@@ -11,7 +11,7 @@ import (
 	"io"
 	"log/slog"
 	"os"
-	"strings"
+	"path/filepath"
 	"time"
 
 	"github.com/netsy-dev/netsy/internal/datafile"
@@ -21,49 +21,47 @@ import (
 	"github.com/netsy-dev/netsy/internal/storage"
 )
 
-// Download retrieves an object from storage, using a temp file for large
-// objects to avoid holding everything in memory.
-func Download(ctx context.Context, store storage.ObjectStorage, key string, size int64, dataDir string, tempFiles *[]string) (io.ReadCloser, error) {
-	const maxMemorySize = 2 * 1024 * 1024 // 2MB
-
+// downloadToTempFile streams a file into a temporary file and returns a file
+// handle positioned at the start of the file.
+func downloadToTempFile(ctx context.Context, store storage.ObjectStorage, key string, tempDir string) (*os.File, int64, error) {
 	reader, err := store.GetStream(ctx, key)
 	if err != nil {
-		return nil, fmt.Errorf("failed to download file: %w", err)
+		return nil, 0, fmt.Errorf("failed to download file: %w", err)
+	}
+	defer reader.Close()
+
+	if tempDir != "" {
+		tempDir = filepath.Join(tempDir, "tmp")
+		if err := os.MkdirAll(tempDir, 0o700); err != nil {
+			return nil, 0, fmt.Errorf("failed to create temporary directory: %w", err)
+		}
 	}
 
-	if size <= maxMemorySize {
-		return reader, nil
-	}
-
-	// For large files, write to a temp file to avoid holding everything in memory
-	var prefix string
-	if strings.Contains(key, "snapshots/") {
-		prefix = "snapshot_"
-	} else {
-		prefix = "chunk_"
-	}
-
-	tempFile, err := os.CreateTemp(dataDir, prefix+"*.netsy")
+	tempFile, err := os.CreateTemp(tempDir, "netsy_*.netsy")
 	if err != nil {
-		reader.Close()
-		return nil, fmt.Errorf("failed to create temporary file: %w", err)
+		return nil, 0, fmt.Errorf("failed to create temporary file: %w", err)
 	}
-	tempPath := tempFile.Name()
-	*tempFiles = append(*tempFiles, tempPath)
+	removeTemp := true
+	// Clean up the temp file only if copy or seek fails. On success, ownership of
+	// the open file handle passes to the caller who is responsible for closing it.
+	defer func() {
+		if removeTemp {
+			path := tempFile.Name()
+			tempFile.Close()
+			os.Remove(path)
+		}
+	}()
 
-	if _, err := io.Copy(tempFile, reader); err != nil {
-		tempFile.Close()
-		reader.Close()
-		return nil, fmt.Errorf("failed to write to temporary file: %w", err)
-	}
-	reader.Close()
-	tempFile.Close()
-
-	readFile, err := os.Open(tempPath)
+	size, err := io.Copy(tempFile, reader)
 	if err != nil {
-		return nil, fmt.Errorf("failed to reopen downloaded file: %w", err)
+		return nil, 0, fmt.Errorf("failed to write to temporary file: %w", err)
 	}
-	return readFile, nil
+	if _, err := tempFile.Seek(0, io.SeekStart); err != nil {
+		return nil, 0, fmt.Errorf("failed to seek temporary file: %w", err)
+	}
+
+	removeTemp = false
+	return tempFile, size, nil
 }
 
 // DownloadAndImportFile downloads a Netsy chunk or snapshot file from object
@@ -73,22 +71,17 @@ func DownloadAndImportFile(
 	logger *slog.Logger,
 	db localdb.Database,
 	store storage.ObjectStorage,
-	dataDir string,
 	key string,
-	size int64,
 	expectedKind pb.FileKind,
 	storageMetrics *metrics.ObjectStorageMetrics,
 ) error {
-	var tempFiles []string
-	defer cleanupTempFiles(logger, tempFiles)
-
 	readStart := time.Now()
-	reader, err := Download(ctx, store, key, size, dataDir, &tempFiles)
+	reader, err := store.GetStream(ctx, key)
 	if storageMetrics != nil {
 		storageMetrics.ObserveRead(time.Since(readStart), err)
 	}
 	if err != nil {
-		return fmt.Errorf("download %s: %w", key, err)
+		return fmt.Errorf("download %s: failed to download file: %w", key, err)
 	}
 	defer reader.Close()
 
@@ -123,14 +116,4 @@ func DownloadAndImportFile(
 	)
 
 	return nil
-}
-
-// cleanupTempFiles removes any temporary files created during object-storage
-// downloads for Netsy file imports.
-func cleanupTempFiles(logger *slog.Logger, tempFiles []string) {
-	for _, file := range tempFiles {
-		if err := os.Remove(file); err != nil && !os.IsNotExist(err) {
-			logger.Warn("failed to remove temporary imported file", "file", file, "error", err)
-		}
-	}
 }

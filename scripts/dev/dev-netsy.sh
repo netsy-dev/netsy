@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Netsy <https://netsy.dev>
-# Copyright 2026 Nadrama Pty Ltd
+# Copyright The Netsy Authors
 # SPDX-License-Identifier: Apache-2.0
 
 # Dev server wrapper for running Netsy under Overmind.

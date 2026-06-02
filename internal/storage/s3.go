@@ -1,5 +1,5 @@
 // Netsy <https://netsy.dev>
-// Copyright 2026 Nadrama Pty Ltd
+// Copyright The Netsy Authors
 // SPDX-License-Identifier: Apache-2.0
 
 package storage
@@ -222,6 +222,38 @@ func (p *s3Provider) PutStream(ctx context.Context, key string, r io.Reader, siz
 	}
 
 	p.logger.Debug("object uploaded to S3", "key", key, "bucket", bucketName, "size", size)
+	return nil
+}
+
+// PutStreamIfMatch stores an object from a stream only if the ETag matches.
+// Returns ErrPrecondition when the precondition is not met.
+func (p *s3Provider) PutStreamIfMatch(ctx context.Context, key string, r io.Reader, size int64, etag string) error {
+	bucketName := p.config.Storage.BucketName
+	storageClass := p.config.Storage.Class
+	input := &s3.PutObjectInput{
+		Bucket:        &bucketName,
+		Key:           &key,
+		Body:          r,
+		ContentLength: aws.Int64(size),
+		StorageClass:  types.StorageClass(storageClass),
+	}
+	p.applyEncryption(input)
+
+	if etag == "" {
+		input.IfNoneMatch = aws.String("*")
+	} else {
+		input.IfMatch = aws.String(quoteS3ETag(etag))
+	}
+
+	_, err := p.client.PutObject(ctx, input)
+	if err != nil {
+		if strings.Contains(err.Error(), "PreconditionFailed") || strings.Contains(err.Error(), "412") {
+			return ErrPrecondition
+		}
+		return fmt.Errorf("failed to upload to S3: %w", err)
+	}
+
+	p.logger.Debug("conditional object uploaded to S3", "key", key, "bucket", bucketName, "size", size)
 	return nil
 }
 

@@ -1,5 +1,5 @@
 // Netsy <https://netsy.dev>
-// Copyright 2026 Nadrama Pty Ltd
+// Copyright The Netsy Authors
 // SPDX-License-Identifier: Apache-2.0
 
 package elector
@@ -12,7 +12,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/nadrama-com/s3lect"
+	"github.com/podplane/s3lect"
 
 	"github.com/netsy-dev/netsy/internal/config"
 	"github.com/netsy-dev/netsy/internal/metrics"
@@ -126,6 +126,7 @@ func New(
 		nil,
 		retryMetrics,
 	)
+	r.server.bootstrapTempDir = cfg.DataDir
 
 	return r, nil
 }
