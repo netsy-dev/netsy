@@ -10,7 +10,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/tidwall/jsonc"
+	"github.com/tailscale/hujson"
 )
 
 // ClusterConfig holds per-cluster settings parsed from a JSONC config file.
@@ -56,15 +56,17 @@ type SnapshotConfig struct {
 	ThresholdAgeMinutes int64 `json:"threshold_age_minutes"` // default 0
 }
 
-// LoadClusterConfig reads a JSONC config file, strips comments, and unmarshals it.
+// LoadClusterConfig reads a JSONC config file, converts it to JSON, and unmarshals it.
 func LoadClusterConfig(path string) (ClusterConfig, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return ClusterConfig{}, fmt.Errorf("failed to read config file %s: %w", path, err)
 	}
 
-	// Strip JSONC comments
-	data = jsonc.ToJSON(data)
+	data, err = hujson.Standardize(data)
+	if err != nil {
+		return ClusterConfig{}, fmt.Errorf("failed to parse config file %s: %w", path, err)
+	}
 
 	var cc ClusterConfig
 	if err := json.Unmarshal(data, &cc); err != nil {

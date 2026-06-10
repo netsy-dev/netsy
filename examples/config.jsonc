@@ -14,7 +14,7 @@
     "bucket_name": "netsy-dev",
     "key_prefix": "",
     "class": "STANDARD",
-    "encryption": "provider-managed"
+    "encryption": "provider-managed",
   },
 
   // How often each Node sends heartbeats to the Elector and Primary
