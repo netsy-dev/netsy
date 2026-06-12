@@ -28,14 +28,15 @@ If `members.json` already exists, Netsy ignores `bootstrap.netsy`.
 2. validates it as a `KIND_SNAPSHOT` Netsy data file;
 3. verifies every record and the file footer CRCs;
 4. requires records to be contiguous from revision `1` through the file's last revision;
-5. refuses to continue if normal durable history already exists under `chunks/` or under a different `snapshots/<revision>.netsy` key;
-6. creates the normal durable snapshot key using the last revision from the bootstrap snapshot:
+5. requires the record at revision `1` to be Netsy's internal `_netsy` initial record;
+6. refuses to continue if normal durable history already exists under `chunks/` or under a different `snapshots/<revision>.netsy` key;
+7. creates the normal durable snapshot key using the last revision from the bootstrap snapshot:
 
    ```text
    snapshots/<zero-padded-last-revision>.netsy
    ```
 
-7. only after that snapshot exists, writes `members.json`.
+8. only after that snapshot exists, writes `members.json`.
 
 After `members.json` exists, normal node bootstrap discovers the promoted snapshot through the standard `snapshots/` path and imports it like any other Netsy-created snapshot.
 
@@ -51,4 +52,4 @@ Place `bootstrap.netsy` in object storage before starting a brand-new cluster. N
 
 Use it only in an otherwise empty Netsy object storage namespace. Do not place it alongside existing `members.json`, `chunks/`, or normal `snapshots/` history. If `bootstrap.netsy` is present during first-cluster bootstrap (while `members.json` does not exist) and conflicting durable history exists, Netsy fails loudly rather than merging histories.
 
-The `bootstrap.netsy` file must be a valid Netsy snapshot data file with contiguous revisions starting at `1`.
+The `bootstrap.netsy` file must be a valid Netsy snapshot data file with contiguous revisions starting at `1`, and revision `1` must be the internal `_netsy` initial record.

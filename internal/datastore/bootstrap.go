@@ -21,6 +21,10 @@ import (
 // snapshot used only when creating a brand new cluster.
 const BootstrapSnapshotKey = "bootstrap.netsy"
 
+// bootstrapInitialRecordKey is Netsy's internal key that must occupy revision 1
+// in every valid cluster history.
+const bootstrapInitialRecordKey = "_netsy"
+
 // PromoteBootstrapSnapshot validates bootstrap.netsy and creates the equivalent
 // normal durable snapshot before cluster initialisation is committed. If the
 // bootstrap snapshot is absent, it returns Found=false. If promotion was already
@@ -80,8 +84,9 @@ func PromoteBootstrapSnapshot(ctx context.Context, store storage.ObjectStorage, 
 // file suitable for seeding a new cluster and returns its last revision. The
 // datafile reader performs the generic file validation: expected kind, header CRC,
 // record CRCs, footer CRC, and aggregate records CRC. Bootstrap promotion adds
-// the stricter seed-state requirements that the snapshot is non-empty and
-// contains contiguous revisions starting at 1.
+// the stricter seed-state requirements that the snapshot is non-empty, contains
+// contiguous revisions starting at 1, and starts with Netsy's internal initial
+// record.
 func validateBootstrapSnapshot(data io.Reader) (int64, error) {
 	kind := pb.FileKind_KIND_SNAPSHOT
 	reader, err := datafile.NewReader(bufio.NewReader(data), &kind)
@@ -100,6 +105,9 @@ func validateBootstrapSnapshot(data io.Reader) (int64, error) {
 		}
 		if record.GetRevision() != previousRevision+1 {
 			return 0, fmt.Errorf("validate bootstrap snapshot: record %d has revision %d after %d", i, record.GetRevision(), previousRevision)
+		}
+		if i == 0 && string(record.GetKey()) != bootstrapInitialRecordKey {
+			return 0, fmt.Errorf("validate bootstrap snapshot: record %d has key %q, want %q", i, record.GetKey(), bootstrapInitialRecordKey)
 		}
 		previousRevision = record.GetRevision()
 	}

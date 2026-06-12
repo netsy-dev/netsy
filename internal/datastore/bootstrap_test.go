@@ -145,6 +145,10 @@ func TestPromoteBootstrapSnapshotRejectsInvalidFiles(t *testing.T) {
 			data: marshalBootstrapTestSnapshot(t, []*proto.Record{bootstrapTestRecord(1), bootstrapTestRecord(3)}),
 		},
 		{
+			name: "missing initial record",
+			data: marshalBootstrapTestSnapshot(t, []*proto.Record{bootstrapTestRecordWithKey(1, "not-netsy")}),
+		},
+		{
 			name: "empty",
 			data: marshalBootstrapTestSnapshot(t, nil),
 		},
@@ -207,9 +211,17 @@ func marshalBootstrapTestChunk(t *testing.T, record *proto.Record) []byte {
 }
 
 func bootstrapTestRecord(revision int64) *proto.Record {
+	key := string([]byte{byte('a' + revision)})
+	if revision == 1 {
+		key = bootstrapInitialRecordKey
+	}
+	return bootstrapTestRecordWithKey(revision, key)
+}
+
+func bootstrapTestRecordWithKey(revision int64, key string) *proto.Record {
 	return &proto.Record{
 		Revision:       revision,
-		Key:            []byte{byte('a' + revision)},
+		Key:            []byte(key),
 		Created:        true,
 		Version:        1,
 		CreateRevision: revision,

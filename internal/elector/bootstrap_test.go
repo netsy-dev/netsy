@@ -102,9 +102,13 @@ func marshalElectorTestSnapshot(t *testing.T, records []*proto.Record) []byte {
 }
 
 func electorTestRecord(revision int64) *proto.Record {
+	key := string([]byte{byte('a' + revision)})
+	if revision == 1 {
+		key = "_netsy"
+	}
 	return &proto.Record{
 		Revision:       revision,
-		Key:            []byte{byte('a' + revision)},
+		Key:            []byte(key),
 		Created:        true,
 		Version:        1,
 		CreateRevision: revision,
