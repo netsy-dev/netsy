@@ -48,8 +48,8 @@ This will:
 4. Start 3 Netsy instances under Overmind
 
 Each instance gets a unique node ID, data directory, port set, log file, and
-TLS certificates. Instance 1 keeps the default ports so existing helper scripts
-continue to work unchanged.
+TLS certificates. Instance 1 keeps the standard development ports so existing
+helper scripts continue to work unchanged.
 
 ### Port Scheme
 
@@ -59,8 +59,8 @@ Ports use a fixed step of 10 per instance:
 |-----------|-----------|-----------|-----------|
 | Client    | 2378      | 2388      | 2398      |
 | Peer      | 2381      | 2391      | 2401      |
-| Election  | 8443      | 8453      | 8463      |
-| Health    | 8080      | 8090      | 8100      |
+| Election  | 18443     | 18453     | 18463     |
+| Health    | 18080     | 18090     | 18100     |
 
 Formula: `port = base + (N - 1) * 10`
 

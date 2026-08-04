@@ -35,8 +35,8 @@ OFFSET=$(( (PROC_NUM - 1) * PORT_STEP ))
 
 CLIENT_PORT=$(( 2378 + OFFSET ))
 PEER_PORT=$(( 2381 + OFFSET ))
-ELECTION_PORT=$(( 8443 + OFFSET ))
-HEALTH_PORT=$(( 8080 + OFFSET ))
+ELECTION_PORT=$(( 18443 + OFFSET ))
+HEALTH_PORT=$(( 18080 + OFFSET ))
 
 # ---------------------------------------------------------------------------
 # AWS S3 (localstack-compatible dev-s3 server)

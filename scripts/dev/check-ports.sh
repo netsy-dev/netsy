@@ -43,8 +43,8 @@ for i in $(seq 1 "${INSTANCE_COUNT}"); do
     echo "Instance ${i}:"
     check_port $(( 2378 + OFFSET )) "instance ${i} client"
     check_port $(( 2381 + OFFSET )) "instance ${i} peer"
-    check_port $(( 8443 + OFFSET )) "instance ${i} election"
-    check_port $(( 8080 + OFFSET )) "instance ${i} health"
+    check_port $(( 18443 + OFFSET )) "instance ${i} election"
+    check_port $(( 18080 + OFFSET )) "instance ${i} health"
 done
 
 echo ""
