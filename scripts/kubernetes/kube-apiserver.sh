@@ -25,6 +25,7 @@ docker run -d --name $CONTAINER_NAME \
   --etcd-certfile=/opt/netsy-certs/client.crt \
   --etcd-keyfile=/opt/netsy-certs/client.key \
   --etcd-cafile=/opt/netsy-certs/ca.crt \
+  --storage-media-type=application/json \
   --client-ca-file=/opt/netsy-certs/ca.crt \
   --tls-cert-file=/opt/netsy-certs/kube-apiserver.crt \
   --tls-private-key-file=/opt/netsy-certs/kube-apiserver.key \
