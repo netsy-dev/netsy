@@ -111,9 +111,16 @@ func (db *database) FindRecordsBy(whereQuery string, whereArgs []any, revision i
 	}
 
 	// Build WHERE clause
-	whereClause := fmt.Sprintf("WHERE (%s)", whereQuery)
+	whereClause := ""
+	if whereQuery != "" {
+		whereClause = fmt.Sprintf("WHERE (%s)", whereQuery)
+	}
 	if revision > 0 {
-		whereClause += " AND revision <= ?"
+		if whereClause == "" {
+			whereClause = "WHERE revision <= ?"
+		} else {
+			whereClause += " AND revision <= ?"
+		}
 		whereArgs = append(whereArgs, revision)
 	}
 
