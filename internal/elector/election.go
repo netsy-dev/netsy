@@ -76,7 +76,7 @@ func New(
 		PeerHealthPath:     "/health/leadership",
 		PeerCACert:         caCertPEM,
 		OnAcquireLeadership: func(ctx context.Context) error {
-			return r.onAcquireLeadership()
+			return r.onAcquireLeadership(ctx)
 		},
 		OnLoseLeadership: func(ctx context.Context) error {
 			return r.onLoseLeadership()
@@ -165,7 +165,7 @@ func (r *Runner) WaitForFirstElection(ctx context.Context) (*s3lect.LeadershipSt
 	r.updateClusterElector(status)
 
 	if status.IsLeader && r.state.Elector() != nodestate.ElectorLeader {
-		if err := r.onAcquireLeadership(); err != nil {
+		if err := r.onAcquireLeadership(ctx); err != nil {
 			return nil, fmt.Errorf("acquire leadership: %w", err)
 		}
 	}
@@ -246,7 +246,10 @@ func (r *Runner) Stop(ctx context.Context) {
 	}
 }
 
-func (r *Runner) onAcquireLeadership() error {
+// onAcquireLeadership starts a leadership epoch. parent must live for the
+// whole election runner lifetime; deadline-scoped contexts would bound the
+// leadership-owned loops started below.
+func (r *Runner) onAcquireLeadership(parent context.Context) error {
 	if r.state.Elector() == nodestate.ElectorLeader {
 		return nil
 	}
@@ -260,22 +263,38 @@ func (r *Runner) onAcquireLeadership() error {
 		PeerAdvertiseAddr: r.peerAddr,
 	})
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(parent)
 	r.leaderCancel = cancel
 
-	go func() {
-		if err := r.server.Bootstrap(ctx); err != nil {
-			r.logger.Error("elector bootstrap failed", "error", err)
-			return
+	if err := r.server.Bootstrap(ctx); err != nil {
+		cancel()
+		r.leaderCancel = nil
+		r.logger.Error("elector bootstrap failed", "error", err)
+		// Revert to follower so this node doesn't hold the lease while
+		// unable to serve. WaitForFirstElection calls us outside s3lect,
+		// so no automatic cleanup happens there. In the s3lect path,
+		// s3lect also fires OnLoseLeadership after a failed acquire,
+		// causing a second call — safe because onLoseLeadership is
+		// idempotent.
+		if loseErr := r.onLoseLeadership(); loseErr != nil {
+			r.logger.Error("failed to clean up after elector bootstrap failure", "error", loseErr)
 		}
-		// Start primary election loop after bootstrap completes.
-		go r.server.runPrimaryElectionLoop(ctx)
-	}()
+		return fmt.Errorf("elector bootstrap: %w", err)
+	}
+
+	// Start leadership-owned loops only after bootstrap has made the
+	// node map ready; otherwise this node can hold the Elector lease
+	// while remaining unable to elect a Primary.
+	// Owner: this leadership epoch. Stop: leaderCancel cancels ctx.
+	// Wait: not joined; the next epoch must tolerate a short overlap.
+	go r.server.runPrimaryElectionLoop(ctx)
 	go r.server.runHealthCheckLoop(ctx)
 
 	return nil
 }
 
+// onLoseLeadership resets node state to follower. Idempotent — may fire
+// twice per epoch (failed-acquire cleanup + s3lect's OnLoseLeadership).
 func (r *Runner) onLoseLeadership() error {
 	r.logger.Info("lost elector leadership")
 	if r.leaderCancel != nil {
@@ -285,8 +304,10 @@ func (r *Runner) onLoseLeadership() error {
 	r.server.nodeMap.Reset()
 	r.state.SetClusterPrimary(nodestate.NodeInfo{})
 	r.server.storePreviousPrimary(nodestate.NodeInfo{})
-	if err := r.state.SetElector(nodestate.ElectorFollower); err != nil {
-		r.logger.Error("failed to transition elector state to follower", "error", err)
+	if r.state.Elector() != nodestate.ElectorFollower {
+		if err := r.state.SetElector(nodestate.ElectorFollower); err != nil {
+			r.logger.Error("failed to transition elector state to follower", "error", err)
+		}
 	}
 	return nil
 }
