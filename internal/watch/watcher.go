@@ -48,7 +48,7 @@ type Watcher struct {
 	inboxOk bool
 	// inboxCh buffers responses for the stream sender. Committed watch events
 	// are no-gap: a full inbox closes the watcher instead of dropping an event.
-	inboxCh  chan pb.WatchResponse
+	inboxCh  chan *pb.WatchResponse
 	doneCh   chan struct{}
 	watches  map[int64]watchEntry
 	progress map[int64]bool
@@ -79,7 +79,7 @@ func NewWatcher(ws pb.Watch_WatchServer) *Watcher {
 		id:       atomic.AddInt64(&watcherIDCounter, 1),
 		client:   ws,
 		inboxOk:  true,
-		inboxCh:  make(chan pb.WatchResponse, inboxCapacity),
+		inboxCh:  make(chan *pb.WatchResponse, inboxCapacity),
 		doneCh:   make(chan struct{}),
 		watches:  map[int64]watchEntry{},
 		progress: map[int64]bool{},
@@ -98,7 +98,7 @@ func (w *Watcher) Client() pb.Watch_WatchServer {
 
 // InboxCh returns the channel used to send WatchResponse messages to
 // the watcher's dispatch goroutine.
-func (w *Watcher) InboxCh() <-chan pb.WatchResponse {
+func (w *Watcher) InboxCh() <-chan *pb.WatchResponse {
 	return w.inboxCh
 }
 
@@ -402,7 +402,7 @@ func (w *Watcher) ReportProgressOnInterval(committedRevision func() int64, logge
 		if broadcast {
 			// send a single watch response to the dispatch channel
 			select {
-			case w.inboxCh <- pb.WatchResponse{
+			case w.inboxCh <- &pb.WatchResponse{
 				Header: &pb.ResponseHeader{
 					Revision: revision,
 				},
@@ -419,7 +419,7 @@ func (w *Watcher) ReportProgressOnInterval(committedRevision func() int64, logge
 			// send a watch response for each watch ID to the dispatch channel
 			for _, watchID := range progressWatchIDs {
 				select {
-				case w.inboxCh <- pb.WatchResponse{
+				case w.inboxCh <- &pb.WatchResponse{
 					Header: &pb.ResponseHeader{
 						Revision: revision,
 					},

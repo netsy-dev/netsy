@@ -7,7 +7,7 @@ package buildvars
 // EtcdCompatVersion is the etcd API version that Netsy aims to be
 // compatible with. This is returned in the StatusResponse.Version
 // field so etcd clients can identify the compatibility target.
-const EtcdCompatVersion = "3.5.21"
+const EtcdCompatVersion = "3.7.0"
 
 // set during build time
 var (

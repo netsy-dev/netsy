@@ -84,7 +84,7 @@ func (m *Manager) Distribute(record *proto.Record, prevRecord *proto.Record) {
 	}
 
 	// note: WatchId is set in the watches loop (below), this is a msg template
-	msg := pb.WatchResponse{
+	msg := &pb.WatchResponse{
 		Header: &pb.ResponseHeader{
 			Revision: record.Revision,
 		},
@@ -126,15 +126,19 @@ func (m *Manager) Distribute(record *proto.Record, prevRecord *proto.Record) {
 		w.RLock()
 		for watchID, watch := range w.watches {
 			if isWatchMatch(watch, record) {
-				ev := *msg.Events[0]
+				ev := &mvccpb.Event{
+					Type: msg.Events[0].Type,
+					Kv:   msg.Events[0].Kv,
+				}
 				if watch.prevKv {
 					ev.PrevKv = msgPrevKv
-				} else {
-					ev.PrevKv = nil
 				}
-				outMsg := msg
-				outMsg.Events = []*mvccpb.Event{&ev}
-				outMsg.WatchId = watchID
+
+				outMsg := &pb.WatchResponse{
+					Header:  msg.Header,
+					Events:  []*mvccpb.Event{ev},
+					WatchId: watchID,
+				}
 				select {
 				case w.inboxCh <- outMsg:
 				default:

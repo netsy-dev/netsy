@@ -57,7 +57,7 @@ func (cs *ClientAPIServer) Watch(ws pb.Watch_WatchServer) error {
 
 			// send message back to client
 			// w.Send serializes writes to the gRPC stream via sendMu
-			if err := w.Send(&msg); err != nil {
+			if err := w.Send(msg); err != nil {
 				cs.logger.Debug("watch send failed", "watcher_id", watcherID, "error", err)
 				return
 			}

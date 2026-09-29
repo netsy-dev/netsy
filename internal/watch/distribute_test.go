@@ -66,13 +66,13 @@ func TestDistributeClosesSlowWatcherWithFullInbox(t *testing.T) {
 
 	manager := NewManager(slog.Default(), nil)
 	watcher := NewWatcher(closedWatcherStream{ctx: context.Background()})
-	watcher.inboxCh = make(chan pb.WatchResponse, 1)
+	watcher.inboxCh = make(chan *pb.WatchResponse, 1)
 	watcher.watches = map[int64]watchEntry{
 		10: {key: []byte("key"), cancel: func() {}},
 	}
 	manager.Register(watcher)
 
-	watcher.inboxCh <- pb.WatchResponse{}
+	watcher.inboxCh <- &pb.WatchResponse{}
 
 	distributeDone := make(chan struct{})
 	go func() {
@@ -146,7 +146,7 @@ func TestDistributeDoesNotShareEventPointersAcrossResponses(t *testing.T) {
 	watcher := &Watcher{
 		id:      1,
 		inboxOk: true,
-		inboxCh: make(chan pb.WatchResponse, 2),
+		inboxCh: make(chan *pb.WatchResponse, 2),
 		watches: map[int64]watchEntry{
 			10: {key: []byte("key"), prevKv: true},
 			20: {key: []byte("key"), prevKv: false},
@@ -160,7 +160,7 @@ func TestDistributeDoesNotShareEventPointersAcrossResponses(t *testing.T) {
 		&proto.Record{Revision: 1, Key: []byte("key"), Value: []byte("old")},
 	)
 
-	responses := map[int64]pb.WatchResponse{}
+	responses := map[int64]*pb.WatchResponse{}
 	for i := 0; i < 2; i++ {
 		select {
 		case msg := <-watcher.inboxCh:

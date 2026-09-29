@@ -60,7 +60,7 @@ func TestCreateWatchSendSerializedWithInboxDispatch(t *testing.T) {
 
 	go func() {
 		for msg := range w.inboxCh {
-			_ = w.Send(&msg)
+			_ = w.Send(msg)
 		}
 	}()
 
@@ -80,7 +80,7 @@ func TestCreateWatchSendSerializedWithInboxDispatch(t *testing.T) {
 				return
 			}
 			select {
-			case w.inboxCh <- pb.WatchResponse{WatchId: 999}:
+			case w.inboxCh <- &pb.WatchResponse{WatchId: 999}:
 			case <-ctx.Done():
 				return
 			default:

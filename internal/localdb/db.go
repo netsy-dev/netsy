@@ -31,6 +31,7 @@ type Database interface {
 	PersistCompactionRevision(revision int64) error
 	ExecuteCompaction(compactionRevision int64) (int64, error)
 	FindRecordsBy(whereQuery string, whereArgs []any, revision int64, limit int64, order string) ([]*proto.Record, int64, error)
+	FindRecordsForRangeStream(whereQuery string, whereArgs []any, revision int64, limit int64, order string, afterKey []byte) ([]*proto.Record, error)
 	FindRecordByRev(revision int64) (*proto.Record, error)
 	FindAllRecordsForSnapshot(upToRevision int64) ([]*proto.Record, error)
 	FindRecordsAfterRevision(revision int64) ([]*proto.Record, error)

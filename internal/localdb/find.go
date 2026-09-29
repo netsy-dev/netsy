@@ -226,6 +226,125 @@ func (db *database) FindRecordsBy(whereQuery string, whereArgs []any, revision i
 	return records, totalCount, nil
 }
 
+func (db *database) FindRecordsForRangeStream(whereQuery string, whereArgs []any, revision int64, limit int64, order string, afterKey []byte) ([]*proto.Record, error) {
+	if order != "ASC" && order != "DESC" {
+		return nil, fmt.Errorf("invalid order: %s", order)
+	}
+	// Build WHERE clause
+	whereClause := ""
+	if whereQuery != "" {
+		whereClause = fmt.Sprintf("WHERE (%s)", whereQuery)
+	}
+	if revision > 0 {
+		if whereClause == "" {
+			whereClause = "WHERE revision <= ?"
+		} else {
+			whereClause += " AND revision <= ?"
+		}
+		whereArgs = append(whereArgs, revision)
+	}
+
+	// Build cursor clause
+	cursorClause := ""
+	if len(afterKey) > 0 {
+		cursorOperator := ">"
+		if order == "DESC" {
+			cursorOperator = "<"
+		}
+		cursorClause = fmt.Sprintf("AND key %s ?", cursorOperator)
+		whereArgs = append(whereArgs, afterKey)
+	}
+
+	// Build ORDER BY clause
+	orderClause := fmt.Sprintf("ORDER BY key %s, revision DESC", order)
+
+	// Build LIMIT clause
+	limitClause := ""
+	if limit > 0 {
+		limitClause = "LIMIT ?"
+		whereArgs = append(whereArgs, limit)
+	}
+
+	query := fmt.Sprintf(`
+		WITH filtered AS (
+			SELECT
+				revision, key, created, deleted, create_revision, prev_revision, version, lease, dek, value, created_at, compacted_at, leader_id, replicated_at,
+				ROW_NUMBER() OVER (PARTITION BY key ORDER BY revision DESC) as rn
+			FROM records
+			%s
+		)
+		SELECT
+			revision, key, created, deleted, create_revision, prev_revision, version, lease, dek, value, created_at, compacted_at, leader_id, replicated_at
+		FROM filtered
+		WHERE rn = 1 AND deleted = 0
+		%s
+		%s %s`,
+		whereClause,
+		cursorClause,
+		orderClause,
+		limitClause,
+	)
+
+	rows, err := db.conn.Query(query, whereArgs...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var records []*proto.Record
+
+	for rows.Next() {
+		var record proto.Record
+		var createdAtStr string
+		var compactedAtStr, replicatedAtStr sql.NullString
+
+		err := rows.Scan(
+			&record.Revision,
+			&record.Key,
+			&record.Created,
+			&record.Deleted,
+			&record.CreateRevision,
+			&record.PrevRevision,
+			&record.Version,
+			&record.Lease,
+			&record.Dek,
+			&record.Value,
+			&createdAtStr,
+			&compactedAtStr,
+			&record.LeaderId,
+			&replicatedAtStr,
+		)
+		if err != nil {
+			return nil, err
+		}
+
+		// Convert string timestamps to protobuf timestamps
+		if createdAtStr != "" {
+			if t, err := time.Parse(time.RFC3339Nano, createdAtStr); err == nil {
+				record.CreatedAt = timestamppb.New(t)
+			}
+		}
+		if compactedAtStr.Valid && compactedAtStr.String != "" {
+			if t, err := time.Parse(time.RFC3339Nano, compactedAtStr.String); err == nil {
+				record.CompactedAt = timestamppb.New(t)
+			}
+		}
+		if replicatedAtStr.Valid && replicatedAtStr.String != "" {
+			if t, err := time.Parse(time.RFC3339Nano, replicatedAtStr.String); err == nil {
+				record.ReplicatedAt = timestamppb.New(t)
+			}
+		}
+
+		records = append(records, &record)
+	}
+
+	if err = rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return records, nil
+}
+
 // FindAllRecordsForSnapshot returns all records up to the specified revision,
 // including deleted records (needed for proper snapshot creation)
 func (db *database) FindAllRecordsForSnapshot(upToRevision int64) ([]*proto.Record, error) {

@@ -28,6 +28,7 @@ Unless otherwise noted below:
 | Service | RPC | Notes |
 |---|---|---|
 | KV | `Range` | Replicas may serve reads up to `committed_revision`; degraded Replicas may still serve stale reads. |
+| KV | `RangeStream` | Same access rules as `Range`. Chunks are sized adaptively based on observed response bytes (etcd's approach); merging all chunks of a stream yields the same result as a single `Range` call, including `Header`, `Count`, and `More`, which are only set on the final chunk. Custom sort orders return `Unimplemented`; `Range`'s other unsupported options return the same errors here. |
 | KV | `Txn` | This is the write path Netsy relies on. Replicas proxy writes to the Primary and quorum/object-storage commit rules apply. |
 | Watch | `Watch` | Watch event delivery is gated by `committed_revision`, and watch admission is constrained by compaction state. |
 | Lease | `LeaseGrant` | `LeaseGrant` returns a synthetic response but does not implement real lease storage or expiry semantics. It should not be treated as etcd-compatible lease behavior. |

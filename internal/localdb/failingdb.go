@@ -71,6 +71,10 @@ func (f *FailingDB) FindRecordsBy(whereQuery string, whereArgs []any, revision i
 	return f.inner.FindRecordsBy(whereQuery, whereArgs, revision, limit, order)
 }
 
+func (f *FailingDB) FindRecordsForRangeStream(whereQuery string, whereArgs []any, revision int64, limit int64, order string, afterKey []byte) ([]*proto.Record, error) {
+	return f.inner.FindRecordsForRangeStream(whereQuery, whereArgs, revision, limit, order, afterKey)
+}
+
 func (f *FailingDB) FindRecordByRev(revision int64) (*proto.Record, error) {
 	return f.inner.FindRecordByRev(revision)
 }
