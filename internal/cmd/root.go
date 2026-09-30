@@ -271,7 +271,9 @@ func NewRootCmd() *cobra.Command {
 		// stable reference to it during bootstrap and later role transitions.
 		snapshotMetrics := snapshot.NewMetrics()
 		primaryGroup.Add(snapshotMetrics.Collectors()...)
-		snapshotWorker := snapshot.NewWorker(filteredLogger, c, db, storageClient, snapshotMetrics, storageMetrics)
+		cleaner := snapshot.NewCleaner(filteredLogger, c, storageClient, snapshotMetrics)
+		defer cleaner.Stop()
+		snapshotWorker := snapshot.NewWorker(filteredLogger, c, db, storageClient, cleaner, snapshotMetrics, storageMetrics)
 		defer snapshotWorker.Stop()
 
 		// watchManager is shared by the Client API server (watch event
@@ -448,6 +450,8 @@ func NewRootCmd() *cobra.Command {
 			jitterWaitThenExit(filteredLogger)
 		}
 		snapshotWorker.InitializeWithSnapshot(bootstrapResult.LatestSnapshotInfo)
+		cleaner.InitializeWithSnapshot(bootstrapResult.LatestSnapshotInfo)
+		cleaner.Start()
 		snapshotWorker.Start()
 
 		// Create Node gRPC server

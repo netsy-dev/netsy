@@ -47,6 +47,21 @@ func (m *mockStorage) Delete(ctx context.Context, key string) error {
 	return nil
 }
 
+// DeleteBatch deletes each key one at a time via Delete.
+func (m *mockStorage) DeleteBatch(ctx context.Context, keys []string) ([]string, error) {
+	for _, key := range keys {
+		if err := m.Delete(ctx, key); err != nil {
+			return nil, err
+		}
+	}
+	return nil, nil
+}
+
+// BulkDeleteLimit reports no native bulk delete.
+func (m *mockStorage) BulkDeleteLimit() int {
+	return 0
+}
+
 func (m *mockStorage) List(ctx context.Context, prefix string) ([]storage.ObjectInfo, error) {
 	if m.listErr != nil {
 		return nil, m.listErr

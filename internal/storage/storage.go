@@ -59,6 +59,13 @@ type ObjectStorage interface {
 	// Delete removes the object at the given key.
 	Delete(ctx context.Context, key string) error
 
+	// DeleteBatch deletes multiple keys, using a bulk API if the backend
+	// has one. Per-key failures come back as failedKeys, not err.
+	DeleteBatch(ctx context.Context, keys []string) (failedKeys []string, err error)
+
+	// BulkDeleteLimit is the native bulk-delete batch size, or 0 if none.
+	BulkDeleteLimit() int
+
 	// List returns all object keys matching the given prefix.
 	List(ctx context.Context, prefix string) ([]ObjectInfo, error)
 }
@@ -125,4 +132,16 @@ func PutStreamIfAbsent(ctx context.Context, store ObjectStorage, key string, dat
 		return fmt.Errorf("object %s already exists with different contents", key)
 	}
 	return nil
+}
+
+// DeleteSequentially is the fallback DeleteBatch for stores with no bulk
+// delete API. Failures are returned via failedKeys, never err.
+func DeleteSequentially(ctx context.Context, store ObjectStorage, keys []string) ([]string, error) {
+	var failedKeys []string
+	for _, key := range keys {
+		if err := store.Delete(ctx, key); err != nil {
+			failedKeys = append(failedKeys, key)
+		}
+	}
+	return failedKeys, nil
 }

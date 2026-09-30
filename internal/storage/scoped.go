@@ -51,6 +51,28 @@ func (s *scopedStorage) Delete(ctx context.Context, key string) error {
 	return s.underlying.Delete(ctx, s.prefix+key)
 }
 
+// DeleteBatch deletes multiple prefixed keys via the underlying store,
+// then strips the scope prefix back off any failed keys before returning.
+func (s *scopedStorage) DeleteBatch(ctx context.Context, keys []string) ([]string, error) {
+	prefixed := make([]string, len(keys))
+	for i, key := range keys {
+		prefixed[i] = s.prefix + key
+	}
+	failedKeys, err := s.underlying.DeleteBatch(ctx, prefixed)
+	if err != nil {
+		return nil, err
+	}
+	for i := range failedKeys {
+		failedKeys[i] = strings.TrimPrefix(failedKeys[i], s.prefix)
+	}
+	return failedKeys, nil
+}
+
+// BulkDeleteLimit delegates to the underlying store.
+func (s *scopedStorage) BulkDeleteLimit() int {
+	return s.underlying.BulkDeleteLimit()
+}
+
 func (s *scopedStorage) List(ctx context.Context, prefix string) ([]ObjectInfo, error) {
 	results, err := s.underlying.List(ctx, s.prefix+prefix)
 	if err != nil {
