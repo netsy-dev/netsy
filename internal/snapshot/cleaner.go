@@ -29,11 +29,14 @@ type Cleaner struct {
 	mu              sync.Mutex
 	pendingRevision int64 // highest enqueued revision not yet cleaned
 	lastCleaned     int64 // highest revision fully cleaned so far
-
-	ctx     context.Context
-	cancel  context.CancelFunc
-	done    chan struct{}
-	started atomic.Bool
+	prevCleaned     int64 // lastCleaned before its most recent advance
+	swept           bool  // a list-based run has succeeded since startup
+	retryDelay      time.Duration
+	retryTimer      *time.Timer // pending retry of a failed run, guarded by mu
+	ctx             context.Context
+	cancel          context.CancelFunc
+	done            chan struct{}
+	started         atomic.Bool
 }
 
 // NewCleaner creates a new chunk cleanup worker.
@@ -45,6 +48,7 @@ func NewCleaner(logger *slog.Logger, cfg *config.Config, storageClient storage.O
 		storageClient: storageClient,
 		metrics:       snapshotMetrics,
 		wake:          make(chan struct{}, 1),
+		retryDelay:    time.Minute,
 		ctx:           ctx,
 		cancel:        cancel,
 		done:          make(chan struct{}),
@@ -61,6 +65,11 @@ func (c *Cleaner) Start() {
 // call even if Start was never invoked
 func (c *Cleaner) Stop() {
 	c.cancel()
+	c.mu.Lock()
+	if c.retryTimer != nil {
+		c.retryTimer.Stop()
+	}
+	c.mu.Unlock()
 	if c.started.Load() {
 		<-c.done
 	}
@@ -143,6 +152,8 @@ func (c *Cleaner) InitializeWithSnapshot(snapshotInfo *datastore.LatestSnapshotI
 		return
 	}
 	c.lastCleaned = snapshotInfo.Revision
+	c.lastCleaned = snapshotInfo.Revision
+	c.prevCleaned = snapshotInfo.Revision
 }
 
 // performCleanup deletes, in bounded rate-limited batches, the chunk
@@ -157,15 +168,20 @@ func (c *Cleaner) InitializeWithSnapshot(snapshotInfo *datastore.LatestSnapshotI
 func (c *Cleaner) performCleanup(upToRevision int64) {
 	start := time.Now()
 	strategy := c.resolveStrategy()
-	c.logger.Info("chunk cleanup starting", "up_to_revision", upToRevision, "strategy", strategy)
+
+	c.mu.Lock()
+	from := c.prevCleaned + 1
+	sweep := strategy == "direct" && !c.swept
+	c.mu.Unlock()
+
+	if sweep {
+		strategy = "list"
+	}
+	c.logger.Info("chunk cleanup starting", "up_to_revision", upToRevision, "strategy", strategy, "startup_sweep", sweep)
 
 	var keys []string
 	switch strategy {
 	case "direct":
-		c.mu.Lock()
-		from := c.lastCleaned + 1
-		c.mu.Unlock()
-
 		for rev := from; rev <= upToRevision; rev++ {
 			keys = append(keys, datastore.ChunkKey(rev))
 		}
@@ -252,7 +268,9 @@ func (c *Cleaner) performCleanup(upToRevision int64) {
 
 	c.mu.Lock()
 	if failed == 0 {
+		c.prevCleaned = c.lastCleaned
 		c.lastCleaned = upToRevision
+		c.swept = true
 	}
 	cleanedThrough := c.lastCleaned
 	c.mu.Unlock()
@@ -277,6 +295,26 @@ func (c *Cleaner) performCleanup(upToRevision int64) {
 	)
 
 	c.observeCleanup(result, start)
+	c.scheduleRetry(upToRevision)
+}
+
+// scheduleRetry queues upToRevision again after retryDelay, so a failed
+// run gets another try even if no new snapshot arrives. Enqueue skips it
+// if a later run has already cleaned that far. Only one retry is
+// pending at a time.
+func (c *Cleaner) scheduleRetry(upToRevision int64) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if c.retryTimer != nil {
+		c.retryTimer.Stop()
+	}
+	c.retryTimer = time.AfterFunc(c.retryDelay, func() {
+		if c.ctx.Err() == nil {
+			c.Enqueue(upToRevision)
+		}
+	})
+	c.logger.Info("chunk cleanup retry scheduled", "up_to_revision", upToRevision, "delay", c.retryDelay)
 }
 
 // observeCleanup records cleanup run metrics when metrics are configured.

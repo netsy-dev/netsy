@@ -340,3 +340,47 @@ func TestCleanerDirectStrategyDeletesWithoutListing(t *testing.T) {
 		}
 	}
 }
+
+func TestCleanerDirectModeCatchesLateAndLeftoverChunks(t *testing.T) {
+	store := storage.NewMemoryStore()
+	seedChunks(t, store, 10, 10)
+
+	cfg := testConfig(250, 0)
+	cfg.Snapshot.CleanupStrategy = "direct"
+	c := NewCleaner(testLogger(), cfg, store, nil)
+	c.InitializeWithSnapshot(&datastore.LatestSnapshotInfo{Found: true, Revision: 40})
+	c.Start()
+	defer c.Stop()
+
+	c.Enqueue(50)
+	waitFor(t, time.Second, func() bool { return c.LastCleaned() == 50 })
+	if _, _, err := store.Get(context.Background(), datastore.ChunkKey(10)); !errors.Is(err, storage.ErrNotFound) {
+		t.Fatalf("chunk 10 left behind before startup should be swept, got err=%v", err)
+	}
+
+	seedChunks(t, store, 50, 50)
+
+	c.Enqueue(100)
+	waitFor(t, time.Second, func() bool { return c.LastCleaned() == 100 })
+	if _, _, err := store.Get(context.Background(), datastore.ChunkKey(50)); !errors.Is(err, storage.ErrNotFound) {
+		t.Fatalf("chunk 50 that landed late should be deleted by the next run, got err=%v", err)
+	}
+}
+
+func TestCleanerRetriesPartialRunWithoutNewSnapshot(t *testing.T) {
+	store := newFlakyStore()
+	seedChunks(t, store, 1, 3)
+	store.failKeyOnce(datastore.ChunkKey(2))
+
+	c := NewCleaner(testLogger(), testConfig(250, 0), store, nil)
+	c.retryDelay = 10 * time.Millisecond
+	c.Start()
+	defer c.Stop()
+
+	c.Enqueue(3)
+	waitFor(t, time.Second, func() bool { return c.LastCleaned() == 3 })
+
+	if _, _, err := store.Get(context.Background(), datastore.ChunkKey(2)); !errors.Is(err, storage.ErrNotFound) {
+		t.Fatalf("chunk 2 should be deleted by the retry, got err=%v", err)
+	}
+}
