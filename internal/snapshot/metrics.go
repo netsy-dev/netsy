@@ -27,6 +27,9 @@ type Metrics struct {
 	ChunksFailed          prometheus.Counter
 	CleanupQueuedRevision prometheus.Gauge
 	CleanupLastRevision   prometheus.Gauge
+	// CleanupCeilingRevision is the highest revision cleanup may reach,
+	// because no further chunk can be written at or below it.
+	CleanupCeilingRevision prometheus.Gauge
 }
 
 // NewMetrics creates all snapshot-scoped Prometheus metrics.
@@ -81,6 +84,10 @@ func NewMetrics() *Metrics {
 			Name: "netsy_primary_snapshot_cleanup_last_revision",
 			Help: "Highest revision fully cleaned so far.",
 		}),
+		CleanupCeilingRevision: prometheus.NewGauge(prometheus.GaugeOpts{
+			Name: "netsy_primary_snapshot_cleanup_ceiling_revision",
+			Help: "Highest revision chunk cleanup may reach, because every chunk at or below it is already in object storage.",
+		}),
 	}
 }
 
@@ -99,6 +106,7 @@ func (m *Metrics) Collectors() []prometheus.Collector {
 		m.ChunksFailed,
 		m.CleanupQueuedRevision,
 		m.CleanupLastRevision,
+		m.CleanupCeilingRevision,
 	}
 }
 

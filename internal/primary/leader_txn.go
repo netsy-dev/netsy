@@ -215,6 +215,7 @@ func (ps *Server) executeObjectStorageTxn(ctx context.Context, tx *localdb.Tx, r
 	if ps.metrics != nil {
 		ps.metrics.ObjectStorageRevision.Set(float64(record.Revision))
 	}
+	ps.chunkBuffer.noteWritten(record.Revision)
 	// Increment revision counter only after successful commit
 	ps.nextRevisionID.Add(1)
 	// Broadcast record to replicas asynchronously (do not wait for Receipt)

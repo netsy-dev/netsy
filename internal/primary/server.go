@@ -39,6 +39,7 @@ type Server struct {
 	db             localdb.Database
 	storageClient  storage.ObjectStorage
 	snapshotWorker *snapshot.Worker
+	cleaner        *snapshot.Cleaner
 	state          *nodestate.State
 	peerClients    *peerclient.Manager
 	watchManager   *watch.Manager
@@ -153,6 +154,12 @@ func (s *Server) StartServices(parent context.Context) {
 	ctx, cancel := context.WithCancel(parent)
 	s.svcCancel = cancel
 
+	// Another Primary may have left chunks behind while this node was a
+	// Replica, so the next cleanup run starts with a full listing.
+	if s.cleaner != nil {
+		s.cleaner.ResetSweep()
+	}
+
 	go s.RunDegradationLoop(ctx)
 	go s.chunkBuffer.Run(ctx)
 	go s.RunCompactionScheduler(ctx)
@@ -177,6 +184,16 @@ func (s *Server) StopServices() {
 	s.resetFollowStreams()
 	s.replicas.Reset()
 	s.logger.Info("primary services stopped")
+}
+
+// AttachCleaner connects chunk cleanup to this server's write path. Cleanup
+// is capped at the chunk buffer's durable ceiling, so it never passes a
+// chunk that has not been written yet, and it is woken whenever that
+// ceiling may have advanced.
+func (s *Server) AttachCleaner(c *snapshot.Cleaner) {
+	s.cleaner = c
+	c.SetCeiling(s.chunkBuffer.durableCeiling)
+	s.chunkBuffer.setOnWritten(c.Wake)
 }
 
 // Replicas returns the server's Replica tracker.

@@ -251,6 +251,7 @@ func TestCleanerRetriesFailedChunksOnNextEnqueue(t *testing.T) {
 		}
 	}
 }
+
 func TestCleanerStaleEnqueueIsNoOp(t *testing.T) {
 	store := newRecordingStore()
 	seedChunks(t, store, 1, 5)
@@ -341,7 +342,7 @@ func TestCleanerDirectStrategyDeletesWithoutListing(t *testing.T) {
 	}
 }
 
-func TestCleanerDirectModeCatchesLateAndLeftoverChunks(t *testing.T) {
+func TestCleanerStartupSweepRemovesLeftoverChunks(t *testing.T) {
 	store := storage.NewMemoryStore()
 	seedChunks(t, store, 10, 10)
 
@@ -358,12 +359,118 @@ func TestCleanerDirectModeCatchesLateAndLeftoverChunks(t *testing.T) {
 		t.Fatalf("chunk 10 left behind before startup should be swept, got err=%v", err)
 	}
 
-	seedChunks(t, store, 50, 50)
+	// After ResetSweep (a new Primary term), the next direct-mode run lists
+	// again and finds a chunk below its range.
+	seedChunks(t, store, 20, 20)
+	c.ResetSweep()
+	c.Enqueue(60)
+	waitFor(t, time.Second, func() bool { return c.LastCleaned() == 60 })
+	if _, _, err := store.Get(context.Background(), datastore.ChunkKey(20)); !errors.Is(err, storage.ErrNotFound) {
+		t.Fatalf("chunk 20 should be swept after ResetSweep, got err=%v", err)
+	}
+}
 
+// requestedKeys counts how often each key was sent to DeleteBatch.
+func requestedKeys(store *recordingStore) map[string]int {
+	batches, _ := store.snapshot()
+	counts := make(map[string]int)
+	for _, batch := range batches {
+		for _, key := range batch {
+			counts[key]++
+		}
+	}
+	return counts
+}
+
+func TestCleanerHoldsAtCeilingUntilChunkIsWritten(t *testing.T) {
+	store := newRecordingStore()
+	seedChunks(t, store, 1, 90)
+
+	cfg := testConfig(250, 0)
+	cfg.Snapshot.CleanupStrategy = "direct"
+	c := NewCleaner(testLogger(), cfg, store, nil)
+	var ceiling atomic.Int64
+	ceiling.Store(90)
+	c.SetCeiling(ceiling.Load)
+	c.Start()
+	defer c.Stop()
+
+	// Snapshot at 100 while records 91..100 are still in the chunk buffer.
 	c.Enqueue(100)
+	waitFor(t, time.Second, func() bool { return c.LastCleaned() == 90 })
+
+	// The buffer flushes on a quiet cluster: one chunk named exactly at the
+	// snapshot revision lands after the snapshot, then the ceiling moves.
+	seedChunks(t, store, 100, 100)
+	ceiling.Store(100)
+	c.Wake()
 	waitFor(t, time.Second, func() bool { return c.LastCleaned() == 100 })
-	if _, _, err := store.Get(context.Background(), datastore.ChunkKey(50)); !errors.Is(err, storage.ErrNotFound) {
-		t.Fatalf("chunk 50 that landed late should be deleted by the next run, got err=%v", err)
+
+	if _, _, err := store.Get(context.Background(), datastore.ChunkKey(100)); !errors.Is(err, storage.ErrNotFound) {
+		t.Fatalf("chunk 100 written after the snapshot should be deleted, got err=%v", err)
+	}
+	for key, n := range requestedKeys(store) {
+		if n != 1 {
+			t.Errorf("key %s requested %d times, want 1", key, n)
+		}
+	}
+}
+
+func TestCleanerCleansFlushLandingBelowSnapshotRevision(t *testing.T) {
+	store := newRecordingStore()
+	seedChunks(t, store, 1, 94)
+
+	cfg := testConfig(250, 0)
+	cfg.Snapshot.CleanupStrategy = "direct"
+	c := NewCleaner(testLogger(), cfg, store, nil)
+	var ceiling atomic.Int64
+	ceiling.Store(94)
+	c.SetCeiling(ceiling.Load)
+	c.Start()
+	defer c.Stop()
+
+	// A flush holding 95..97 is in flight when the snapshot at 100 fires.
+	c.Enqueue(100)
+	waitFor(t, time.Second, func() bool { return c.LastCleaned() == 94 })
+
+	// Its chunk lands, named 97, below the snapshot revision; the rest of
+	// the buffer (98..100) flushes later as chunk 100.
+	seedChunks(t, store, 97, 97)
+	ceiling.Store(97)
+	c.Wake()
+	waitFor(t, time.Second, func() bool { return c.LastCleaned() == 97 })
+
+	seedChunks(t, store, 100, 100)
+	ceiling.Store(100)
+	c.Wake()
+	waitFor(t, time.Second, func() bool { return c.LastCleaned() == 100 })
+
+	for _, rev := range []int64{97, 100} {
+		if _, _, err := store.Get(context.Background(), datastore.ChunkKey(rev)); !errors.Is(err, storage.ErrNotFound) {
+			t.Errorf("chunk %d should be deleted, got err=%v", rev, err)
+		}
+	}
+	for key, n := range requestedKeys(store) {
+		if n != 1 {
+			t.Errorf("key %s requested %d times, want 1", key, n)
+		}
+	}
+}
+
+func TestCleanerDoesNotPassCeilingAboveSnapshot(t *testing.T) {
+	store := storage.NewMemoryStore()
+	seedChunks(t, store, 1, 20)
+
+	c := NewCleaner(testLogger(), testConfig(250, 0), store, nil)
+	c.SetCeiling(func() int64 { return 1000 })
+	c.Start()
+	defer c.Stop()
+
+	c.Enqueue(10)
+	waitFor(t, time.Second, func() bool { return c.LastCleaned() == 10 })
+
+	if _, _, err := store.Get(context.Background(), datastore.ChunkKey(11)); err != nil {
+		t.Fatalf("chunk 11 is above the snapshot and must be kept, got err=%v", err)
 	}
 }
 

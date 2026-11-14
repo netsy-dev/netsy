@@ -46,6 +46,13 @@ type chunkBuffer struct {
 	thresholdAge   time.Duration
 	metrics        *Metrics
 	storageMetrics *metrics.ObjectStorageMetrics
+
+	// lastWritten is the highest revision known to be in object storage,
+	// from a buffer flush, a synchronous write, or preflight.
+	lastWritten int64
+	// onWritten is called, outside mu, whenever lastWritten may have
+	// advanced. It lets chunk cleanup resume once its ceiling moves.
+	onWritten func()
 }
 
 func newChunkBuffer(
@@ -164,7 +171,11 @@ func (b *chunkBuffer) flush(ctx context.Context, trigger string) error {
 
 	b.mu.Lock()
 	b.flushing = false
+	onWritten := b.onWritten
 	if err == nil {
+		if lastRevision > b.lastWritten {
+			b.lastWritten = lastRevision
+		}
 		b.records = b.records[len(records):]
 		b.bytes -= batchBytes
 		if b.bytes < 0 {
@@ -214,7 +225,55 @@ func (b *chunkBuffer) flush(ctx context.Context, trigger string) error {
 		"duration_ms", int64(flushDuration*1000),
 	)
 
+	if onWritten != nil {
+		onWritten()
+	}
+
 	return nil
+}
+
+// noteWritten records that revision was written to object storage outside
+// the buffer (a synchronous write or preflight) and notifies onWritten.
+// It is a no-op on a nil buffer.
+func (b *chunkBuffer) noteWritten(revision int64) {
+	if b == nil {
+		return
+	}
+	b.mu.Lock()
+	if revision > b.lastWritten {
+		b.lastWritten = revision
+	}
+	onWritten := b.onWritten
+	b.mu.Unlock()
+
+	if onWritten != nil {
+		onWritten()
+	}
+}
+
+// setOnWritten sets the hook called whenever lastWritten may have advanced.
+func (b *chunkBuffer) setOnWritten(fn func()) {
+	b.mu.Lock()
+	b.onWritten = fn
+	b.mu.Unlock()
+}
+
+// durableCeiling returns the highest revision R such that no chunk named at
+// or below R can still be written to object storage. Chunks are named after
+// the last revision they contain, so any chunk still to come from the buffer
+// is named at or above its oldest buffered record. Records stay buffered
+// until their flush succeeds, which covers a flush that is in flight.
+func (b *chunkBuffer) durableCeiling() int64 {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	ceiling := b.lastWritten
+	if len(b.records) > 0 {
+		if pending := b.records[0].GetRevision() - 1; pending < ceiling {
+			ceiling = pending
+		}
+	}
+	return ceiling
 }
 
 // Run evaluates age-triggered and Draining-triggered chunk-buffer flushes

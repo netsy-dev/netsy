@@ -10,6 +10,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -255,4 +256,62 @@ func waitForChunk(t *testing.T, store storage.ObjectStorage, key string) {
 	}
 
 	t.Fatalf("chunk %s was not flushed before timeout", key)
+}
+
+// TestChunkBufferDurableCeiling verifies that the durable ceiling never
+// reaches a revision whose chunk could still be written, including while a
+// flush is in flight and when a synchronous write lands during that flush.
+func TestChunkBufferDurableCeiling(t *testing.T) {
+	store := &blockingPutStore{
+		MemoryStore: storage.NewMemoryStore(),
+		entered:     make(chan struct{}),
+		release:     make(chan struct{}),
+	}
+	srv := newChunkBufferTestServer(t, store)
+	b := srv.chunkBuffer
+	b.thresholdBytes = 1 << 20
+
+	var wakes atomic.Int32
+	b.setOnWritten(func() { wakes.Add(1) })
+
+	if got := b.durableCeiling(); got != 0 {
+		t.Fatalf("durableCeiling() with nothing written = %d, want 0", got)
+	}
+
+	b.noteWritten(4)
+	if got := b.durableCeiling(); got != 4 {
+		t.Fatalf("durableCeiling() after noteWritten(4) = %d, want 4", got)
+	}
+
+	for rev := int64(5); rev <= 7; rev++ {
+		if err := b.bufferRecord(context.Background(), testReplicatedRecord(rev, nil)); err != nil {
+			t.Fatalf("bufferRecord(%d) error = %v", rev, err)
+		}
+	}
+	if got := b.durableCeiling(); got != 4 {
+		t.Fatalf("durableCeiling() with 5..7 buffered = %d, want 4", got)
+	}
+
+	flushErr := make(chan error, 1)
+	go func() { flushErr <- b.flush(context.Background(), "test") }()
+	<-store.entered
+
+	// A synchronous write of revision 10 lands while the flush of 5..7 is
+	// still uploading, as after a quorum rollback. Chunk 7 is not written
+	// yet, so the ceiling must stay below it.
+	b.noteWritten(10)
+	if got := b.durableCeiling(); got != 4 {
+		t.Fatalf("durableCeiling() during in-flight flush = %d, want 4", got)
+	}
+
+	close(store.release)
+	if err := <-flushErr; err != nil {
+		t.Fatalf("flush() error = %v", err)
+	}
+	if got := b.durableCeiling(); got != 10 {
+		t.Fatalf("durableCeiling() after flush = %d, want 10", got)
+	}
+	if got := wakes.Load(); got != 3 {
+		t.Fatalf("onWritten called %d times, want 3 (two noteWritten, one flush)", got)
+	}
 }

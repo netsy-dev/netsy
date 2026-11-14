@@ -314,6 +314,7 @@ func NewRootCmd() *cobra.Command {
 			filteredLogger.Error("Failed to create primary server", "error", err)
 			os.Exit(1)
 		}
+		primarySrv.AttachCleaner(cleaner)
 
 		// Start elector — s3lect election, health server, and elector service.
 		// Created after DB and peer manager so all election dependencies are
