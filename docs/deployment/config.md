@@ -129,7 +129,10 @@ netsy --config /etc/netsy/config.jsonc
   "snapshot": {
     "threshold_records": 10000,       // create snapshot after N records since last snapshot
     "threshold_size_mb": 10000,       // create snapshot when chunks exceed N MB
-    "threshold_age_minutes": 0        // create snapshot after N minutes since last snapshot (0 = disabled)
+    "threshold_age_minutes": 0,       // create snapshot after N minutes since last snapshot (0 = disabled)
+    "cleanup_batch_size": 250,        // chunk objects deleted per cleanup batch after a snapshot
+    "cleanup_batch_interval": "1s",   // pause between cleanup batches
+    "cleanup_strategy": "auto"        // how cleanup finds chunks to delete: auto, list, or direct
   },
 
   // How often the Primary schedules compaction across all Nodes
@@ -175,6 +178,9 @@ GCS example:
 | `snapshot.threshold_records` | `10000` | Snapshot after N records |
 | `snapshot.threshold_size_mb` | `10000` | Snapshot when chunks exceed N MB |
 | `snapshot.threshold_age_minutes` | `0` | Snapshot after N minutes (`0` = disabled) |
+| `snapshot.cleanup_batch_size` | `250` | Chunk objects deleted per batch when cleaning up Chunk files covered by a Snapshot |
+| `snapshot.cleanup_batch_interval` | `1s` | Pause between cleanup batches, to keep deletes from competing with Chunk writes |
+| `snapshot.cleanup_strategy` | `auto` | `list` lists Chunk files before deleting them; `direct` deletes computed Chunk keys without listing; `auto` uses `direct` when the backend supports bulk delete, else `list`. Use `list` on versioned buckets, where deleting a missing key still creates a delete marker |
 | `compaction_interval` | — | Compaction scheduling interval |
 
 For replication, the heartbeat-based degradation window is `heartbeat_interval × replication.degradation_count`. If that window is longer than the quorum receipt timeout, a Replica may be marked `Degraded` immediately on quorum timeout and then recover quickly on a subsequent Heartbeat or Receipt.

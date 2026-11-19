@@ -7,7 +7,6 @@
 {
   // Cluster identity — must match the Organization (O) field in TLS certificates
   "cluster_id": "dev-cluster",
-
   // Object storage configuration
   "storage": {
     "provider": "s3",
@@ -16,17 +15,14 @@
     "class": "STANDARD",
     "encryption": "provider-managed",
   },
-
   // How often each Node sends heartbeats to the Elector and Primary
   "heartbeat_interval": "1s",
-
   // Elector leader election and node lifecycle
   "elector": {
     "degradation_count": 2,
     "deregistration_timeout": "3m",
     "primary_prior_timeout": "5s"
   },
-
   // Replication stream between Primary and Replicas
   "replication": {
     "quorum": -1,
@@ -36,14 +32,15 @@
       "threshold_age_minutes": 1
     }
   },
-
   // Snapshot creation thresholds
   "snapshot": {
     "threshold_records": 10000,
     "threshold_size_mb": 10000,
-    "threshold_age_minutes": 0
+    "threshold_age_minutes": 0,
+    "cleanup_batch_size": 250,
+    "cleanup_batch_interval": "1s",
+    "cleanup_strategy": "auto"
   },
-
   // How often the Primary schedules compaction across all Nodes
   "compaction_interval": "5m"
 }

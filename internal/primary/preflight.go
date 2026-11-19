@@ -216,6 +216,10 @@ func (s *Server) runPreflightPass(ctx context.Context) error {
 		return fmt.Errorf("read latest revision after preflight sync: %w", err)
 	}
 
+	// Every local record is now in object storage, either from before this
+	// pass or from the replay above.
+	s.chunkBuffer.noteWritten(latestRevision)
+
 	s.state.SetCommitted(latestRevision)
 	s.nextRevisionID.Store(latestRevision + 1)
 	s.BroadcastCommit(latestRevision)

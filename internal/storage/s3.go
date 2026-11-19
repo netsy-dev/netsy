@@ -31,6 +31,9 @@ type s3Provider struct {
 	logger *slog.Logger
 }
 
+// s3MaxDeleteBatch is S3's hard limit on keys per DeleteObjects call.
+const s3MaxDeleteBatch = 1000
+
 // newS3Provider creates a new S3 provider with the provided configuration.
 // AWS SDK reads AWS_DEFAULT_REGION, AWS_ENDPOINT_URL, AWS_ACCESS_KEY_ID,
 // AWS_SECRET_ACCESS_KEY, AWS_SESSION_TOKEN from env automatically via LoadDefaultConfig.
@@ -270,6 +273,49 @@ func (p *s3Provider) Delete(ctx context.Context, key string) error {
 
 	p.logger.Debug("object deleted from S3", "key", key, "bucket", bucketName)
 	return nil
+}
+
+// DeleteBatch deletes multiple objects using S3's DeleteObjects API, which
+// accepts up to 1000 keys per call. Callers may pass more than 1000 keys;
+// DeleteBatch issues as many sub-requests as needed.
+func (p *s3Provider) DeleteBatch(ctx context.Context, keys []string) ([]string, error) {
+	bucketName := p.config.Storage.BucketName
+	var failedKeys []string
+
+	for i := 0; i < len(keys); i += s3MaxDeleteBatch {
+		end := min(i+s3MaxDeleteBatch, len(keys))
+		batch := keys[i:end]
+
+		objects := make([]types.ObjectIdentifier, len(batch))
+		for j, key := range batch {
+			k := key
+			objects[j] = types.ObjectIdentifier{Key: &k}
+		}
+
+		output, err := p.client.DeleteObjects(ctx, &s3.DeleteObjectsInput{
+			Bucket: &bucketName,
+			Delete: &types.Delete{Objects: objects, Quiet: aws.Bool(true)},
+		})
+		if err != nil {
+			return failedKeys, fmt.Errorf("failed to bulk delete objects from S3: %w", err)
+		}
+
+		for _, delErr := range output.Errors {
+			if delErr.Key != nil {
+				failedKeys = append(failedKeys, *delErr.Key)
+				p.logger.Warn("failed to delete object in batch",
+					"key", *delErr.Key, "code", aws.ToString(delErr.Code), "message", aws.ToString(delErr.Message))
+			}
+		}
+	}
+
+	p.logger.Debug("bulk deleted objects from S3", "bucket", bucketName, "requested", len(keys), "failed", len(failedKeys))
+	return failedKeys, nil
+}
+
+// BulkDeleteLimit is S3's DeleteObjects limit.
+func (p *s3Provider) BulkDeleteLimit() int {
+	return s3MaxDeleteBatch
 }
 
 // List returns all object keys matching the given prefix

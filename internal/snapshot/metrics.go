@@ -18,6 +18,18 @@ type Metrics struct {
 	Creations *prometheus.CounterVec
 	CreateDur *prometheus.HistogramVec
 	Age       *snapshotAgeGauge
+
+	CleanupRuns           *prometheus.CounterVec
+	CleanupDur            *prometheus.HistogramVec
+	ChunksListed          prometheus.Counter
+	ChunksRequested       prometheus.Counter
+	ChunksDeleted         prometheus.Counter
+	ChunksFailed          prometheus.Counter
+	CleanupQueuedRevision prometheus.Gauge
+	CleanupLastRevision   prometheus.Gauge
+	// CleanupCeilingRevision is the highest revision cleanup may reach,
+	// because no further chunk can be written at or below it.
+	CleanupCeilingRevision prometheus.Gauge
 }
 
 // NewMetrics creates all snapshot-scoped Prometheus metrics.
@@ -35,6 +47,47 @@ func NewMetrics() *Metrics {
 		}, []string{"result"}),
 
 		Age: newSnapshotAgeGauge(),
+
+		CleanupRuns: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "netsy_primary_snapshot_cleanup_runs_total",
+			Help: "Chunk cleanup runs by the Primary, by result.",
+		}, []string{"result"}),
+
+		CleanupDur: prometheus.NewHistogramVec(prometheus.HistogramOpts{
+			Name:    "netsy_primary_snapshot_cleanup_duration_seconds",
+			Help:    "End-to-end chunk cleanup run duration.",
+			Buckets: prometheus.DefBuckets,
+		}, []string{"result"}),
+
+		ChunksListed: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "netsy_primary_snapshot_cleanup_chunks_listed_total",
+			Help: "Chunk objects listed for cleanup.",
+		}),
+		ChunksRequested: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "netsy_primary_snapshot_cleanup_chunks_requested_total",
+			Help: "Delete requests sent in direct mode, without confirming the key existed.",
+		}),
+		ChunksDeleted: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "netsy_primary_snapshot_cleanup_chunks_deleted_total",
+			Help: "Chunk objects successfully deleted by cleanup.",
+		}),
+		ChunksFailed: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "netsy_primary_snapshot_cleanup_chunks_failed_total",
+			Help: "Chunk object deletions that failed during cleanup.",
+		}),
+
+		CleanupQueuedRevision: prometheus.NewGauge(prometheus.GaugeOpts{
+			Name: "netsy_primary_snapshot_cleanup_queued_revision",
+			Help: "Highest revision currently enqueued for chunk cleanup.",
+		}),
+		CleanupLastRevision: prometheus.NewGauge(prometheus.GaugeOpts{
+			Name: "netsy_primary_snapshot_cleanup_last_revision",
+			Help: "Highest revision fully cleaned so far.",
+		}),
+		CleanupCeilingRevision: prometheus.NewGauge(prometheus.GaugeOpts{
+			Name: "netsy_primary_snapshot_cleanup_ceiling_revision",
+			Help: "Highest revision chunk cleanup may reach, because every chunk at or below it is already in object storage.",
+		}),
 	}
 }
 
@@ -45,6 +98,15 @@ func (m *Metrics) Collectors() []prometheus.Collector {
 		m.Creations,
 		m.CreateDur,
 		m.Age,
+		m.CleanupRuns,
+		m.CleanupDur,
+		m.ChunksListed,
+		m.ChunksRequested,
+		m.ChunksDeleted,
+		m.ChunksFailed,
+		m.CleanupQueuedRevision,
+		m.CleanupLastRevision,
+		m.CleanupCeilingRevision,
 	}
 }
 

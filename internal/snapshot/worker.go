@@ -36,6 +36,7 @@ type Worker struct {
 	config        *config.Config
 	db            localdb.Database
 	storageClient storage.ObjectStorage
+	cleaner       *Cleaner
 
 	// Channel for receiving snapshot requests
 	requestCh chan SnapshotRequest
@@ -58,7 +59,7 @@ type Worker struct {
 }
 
 // NewWorker creates a new snapshot worker
-func NewWorker(logger *slog.Logger, config *config.Config, db localdb.Database, storageClient storage.ObjectStorage, snapshotMetrics *Metrics, storageMetrics *metrics.ObjectStorageMetrics) *Worker {
+func NewWorker(logger *slog.Logger, config *config.Config, db localdb.Database, storageClient storage.ObjectStorage, cleaner *Cleaner, snapshotMetrics *Metrics, storageMetrics *metrics.ObjectStorageMetrics) *Worker {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	return &Worker{
@@ -66,6 +67,7 @@ func NewWorker(logger *slog.Logger, config *config.Config, db localdb.Database, 
 		config:         config,
 		db:             db,
 		storageClient:  storageClient,
+		cleaner:        cleaner,
 		requestCh:      make(chan SnapshotRequest, 100), // Buffered channel to avoid blocking
 		metrics:        snapshotMetrics,
 		storageMetrics: storageMetrics,
@@ -270,28 +272,9 @@ func (w *Worker) createSnapshot(upToRevision int64) {
 
 	w.logger.Info("snapshot uploaded to object storage successfully", "revision", upToRevision, "records", len(records), "key", snapshotKey)
 
-	// Start cleanup of old chunk files
-	w.logger.Info("starting chunk file cleanup", "up_to_revision", upToRevision)
-
-	// List all chunk files that are covered by the snapshot (revision <= upToRevision)
-	chunks, err := datastore.ListChunksForCleanup(w.ctx, w.storageClient, upToRevision)
-	if err != nil {
-		w.logger.Error("failed to list chunks for cleanup", "error", err)
-		return
+	if w.cleaner != nil {
+		w.cleaner.Enqueue(upToRevision)
 	}
-	deletedCount := 0
-	for _, chunk := range chunks {
-		err := w.storageClient.Delete(w.ctx, chunk.Key)
-		if err != nil {
-			w.logger.Warn("failed to delete chunk file", "key", chunk.Key, "error", err)
-			continue
-		}
-		deletedCount++
-		w.logger.Debug("deleted chunk file", "key", chunk.Key, "revision", chunk.Revision)
-	}
-
-	w.logger.Info("chunk file cleanup completed",
-		"up_to_revision", upToRevision, "deleted_chunks", deletedCount)
 
 	w.observeSnapshot("success", snapshotStart)
 }

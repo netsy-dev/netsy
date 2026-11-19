@@ -125,6 +125,16 @@ func (m *MemoryStore) Delete(_ context.Context, key string) error {
 	return nil
 }
 
+// DeleteBatch has no native bulk API here, so it falls back to Delete.
+func (m *MemoryStore) DeleteBatch(ctx context.Context, keys []string) ([]string, error) {
+	return DeleteSequentially(ctx, m, keys)
+}
+
+// BulkDeleteLimit is 0: no native bulk delete here.
+func (m *MemoryStore) BulkDeleteLimit() int {
+	return 0
+}
+
 func (m *MemoryStore) List(_ context.Context, prefix string) ([]ObjectInfo, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()

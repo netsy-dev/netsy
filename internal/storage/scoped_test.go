@@ -119,6 +119,12 @@ func (e *errorStorage) PutStreamIfMatch(_ context.Context, _ string, _ io.Reader
 func (e *errorStorage) Delete(_ context.Context, _ string) error {
 	return fmt.Errorf("delete error")
 }
+func (e *errorStorage) BulkDeleteLimit() int {
+	return 0
+}
 func (e *errorStorage) List(_ context.Context, _ string) ([]ObjectInfo, error) {
 	return nil, fmt.Errorf("list error")
+}
+func (e *errorStorage) DeleteBatch(_ context.Context, _ []string) ([]string, error) {
+	return nil, fmt.Errorf("delete batch error")
 }

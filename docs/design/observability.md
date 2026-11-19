@@ -142,6 +142,20 @@ Snapshot creation is a Primary-only maintenance operation that compacts Chunk fi
 | `netsy_primary_snapshot_creation_duration_seconds` | Histogram | `result` | End-to-end duration of snapshot creation, including reading records from SQLite and uploading to object storage. |
 | `netsy_primary_snapshot_age_seconds` | Gauge | | Seconds since the last successful snapshot was created, computed at collect-time. Useful for alerting when snapshots are not being created on schedule. |
 
+After a Snapshot is uploaded, the Chunk files it covers are deleted by a separate background cleaner, in rate-limited batches. Cleanup never goes past the ceiling revision: the highest revision at or below which no further Chunk file can be written. On the quorum write path, records covered by a Snapshot may still be in the Chunk Buffer, so cleanup of those Chunk files waits for the buffer to flush.
+
+| Metric | Type | Labels | Description |
+|---|---|---|---|
+| `netsy_primary_snapshot_cleanup_runs_total` | Counter | `result` | Chunk cleanup runs. `result` is `success`, `partial` (some deletes failed and will be retried), `error` (listing failed), or `interrupted` (shutdown). |
+| `netsy_primary_snapshot_cleanup_duration_seconds` | Histogram | `result` | End-to-end duration of a chunk cleanup run. |
+| `netsy_primary_snapshot_cleanup_chunks_listed_total` | Counter | | Chunk objects found by listing for cleanup. |
+| `netsy_primary_snapshot_cleanup_chunks_requested_total` | Counter | | Chunk keys sent for deletion in `direct` mode, without confirming they existed. |
+| `netsy_primary_snapshot_cleanup_chunks_deleted_total` | Counter | | Chunk objects deleted after listing. |
+| `netsy_primary_snapshot_cleanup_chunks_failed_total` | Counter | | Chunk object deletions that failed. |
+| `netsy_primary_snapshot_cleanup_queued_revision` | Gauge | | Highest Snapshot revision queued for cleanup. |
+| `netsy_primary_snapshot_cleanup_last_revision` | Gauge | | Highest revision fully cleaned. |
+| `netsy_primary_snapshot_cleanup_ceiling_revision` | Gauge | | Highest revision cleanup may reach, because every Chunk file at or below it is already in object storage. |
+
 ### Retries
 
 Every retry path has a corresponding counter so operators can see degradation before it becomes a failure.
@@ -280,6 +294,7 @@ When diagnosing issues, the following metric relationships are useful:
 - __Election stalls__: inspect `netsy_elector_primary_election_duration_seconds`, `netsy_elector_primary_election_failures_total`, `netsy_elector_primary_election_contacts_total`, and election logs to determine whether the cluster is blocked on prior-Primary contact, node contactability, or candidate validation.
 - __Compaction stalls__: rising `netsy_watch_min_revision` skew across Nodes (compare by Prometheus `instance` label), long `netsy_compaction_duration_seconds`, or repeated increments in `netsy_primary_compaction_confirmation_failures_total` indicate watch-admission, confirmation, or local compaction-work issues.
 - __Snapshot staleness__: a rising `netsy_primary_snapshot_age_seconds` or repeated `netsy_primary_snapshot_creations_total{result="error"}` increments indicate snapshots are not being created, which increases loading/recovery time for new Nodes.
+- __Snapshot cleanup backlog__: a sustained gap between `netsy_primary_snapshot_cleanup_queued_revision` and `netsy_primary_snapshot_cleanup_last_revision` means cleanup is behind. If `netsy_primary_snapshot_cleanup_ceiling_revision` is the value holding it back, cleanup is waiting for the Chunk Buffer to flush, which is expected for up to `replication.chunk_buffer.threshold_age_minutes`. Rising `netsy_primary_snapshot_cleanup_chunks_failed_total` or `netsy_primary_snapshot_cleanup_runs_total{result="partial"}` indicates delete failures; failed runs are retried after one minute.
 - __Registration issues__: rising `netsy_retries_total{operation="node_registration"}` or long `netsy_node_registration_duration_seconds` during loading indicate Service Discovery or Elector connectivity problems. Correlate with `node_registered` / `node_deregistered` logs.
 - __Client API health__: rising `netsy_client_requests_total{result="error"}` or elevated `netsy_client_request_duration_seconds` indicates client-facing degradation. Compare `netsy_replica_proxy_requests_total` error rates on Replicas to determine whether failures originate from the Replica's proxy path or the Primary itself.
 
