@@ -19,21 +19,9 @@ import (
 const electionRetryInterval = 500 * time.Millisecond
 
 // runPrimaryElectionLoop retries primary election every 500ms until a
-// Primary is elected or ctx is cancelled. It is started as a goroutine
-// when the node acquires Elector leadership.
+// Primary is elected or ctx is cancelled. The caller starts it only after
+// elector bootstrap has completed and the node map is ready.
 func (s *Server) runPrimaryElectionLoop(ctx context.Context) {
-	// Wait for bootstrap to complete.
-	for {
-		if s.nodeMap.Ready() {
-			break
-		}
-		select {
-		case <-ctx.Done():
-			return
-		case <-time.After(100 * time.Millisecond):
-		}
-	}
-
 	for {
 		select {
 		case <-ctx.Done():
